@@ -12,6 +12,11 @@ import TesseraCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    private lazy var commandPalette: CommandPaletteController = {
+        let palette = CommandPaletteController()
+        palette.onSelect = { [weak self] item in self?.activate(item) }
+        return palette
+    }()
 
     /// The currently-selected target application.
     private struct Target {
@@ -92,6 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(exact)
 
         menu.addItem(.separator())
+        let palette = NSMenuItem(title: "Command Palette…", action: #selector(openCommandPalette), keyEquivalent: " ")
+        palette.keyEquivalentModifierMask = [.command]
+        palette.target = self
+        menu.addItem(palette)
+
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Tessera", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -115,6 +126,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func applyExactTest() {
         moveSelectedTarget(to: CGRect(x: 100, y: 100, width: 900, height: 620))
+    }
+
+    @objc private func openCommandPalette() {
+        commandPalette.present()
+    }
+
+    /// Default palette action: bring the chosen app/window to the front. Later
+    /// milestones will replace this with "snap into the focused pane".
+    private func activate(_ item: PaletteItem) {
+        switch item.kind {
+        case .window(let windowID):
+            if let pid = item.pid {
+                AppTargeter.focusWindow(pid: pid, windowID: windowID)
+            }
+        case .application:
+            guard let bundleID = item.bundleID else { return }
+            if let running = AppTargeter.runningApp(bundleID: bundleID) {
+                running.activate(options: [.activateAllWindows])
+            } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+            }
+        }
     }
 
     private func moveSelectedTarget(to rect: CGRect) {

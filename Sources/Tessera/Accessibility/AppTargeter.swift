@@ -67,6 +67,14 @@ enum AppTargeter {
         return raw.map(AXWindow.init(element:))
     }
 
+    /// Raise a specific window (by CGWindowID) within its app and bring the app
+    /// forward. Falls back to plain app activation if the window can't be found.
+    static func focusWindow(pid: pid_t, windowID: CGWindowID) {
+        let appElement = AXUIElementCreateApplication(pid)
+        windows(of: appElement).first { $0.windowID == windowID }?.raise()
+        NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+    }
+
     /// The app's primary window — the one the user would expect a "move this
     /// app" command to act on. Prefers the AX main window, falling back to the
     /// first window in the list.

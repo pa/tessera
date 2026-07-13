@@ -39,6 +39,19 @@ struct AXWindow {
         return value as? String
     }
 
+    /// The window's `CGWindowID`, via the private AX bridge, for correlating
+    /// with `CGWindowList`. Nil if the element isn't a real on-screen window.
+    var windowID: CGWindowID? {
+        var wid = CGWindowID(0)
+        return _AXUIElementGetWindow(element, &wid) == .success ? wid : nil
+    }
+
+    /// Bring this window to the front of its application's window stack.
+    @discardableResult
+    func raise() -> AXError {
+        AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    }
+
     /// Move the window so its top-left corner sits at `point`. Returns the AX
     /// error so callers can detect apps that refuse to move.
     @discardableResult

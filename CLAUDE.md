@@ -55,13 +55,19 @@ Sources/
   TesseraCore/                      Pure, UI-independent logic (CoreGraphics only)
     ScreenLayout.swift              Screen-relative named placements (prototype)
     BSPLayout.swift                 BSP tree + LayoutTree: split/remove/resize → frames
+    FuzzyMatcher.swift              Subsequence fuzzy match + ranking (palette filter)
   Tessera/                          Menu-bar agent (AppKit + Accessibility)
     main.swift                      AppKit programmatic entry (menu-bar agent)
     AppDelegate.swift               Menu-bar UI + prototype actions
     Accessibility/
       AccessibilityAuthorizer.swift AX trust check / prompt
-      AXWindow.swift                Typed wrapper: read/set window position & size
-      AppTargeter.swift             Find (or launch) an app, get its main window
+      AXWindow.swift                Typed wrapper: window position/size/title/raise
+      AppTargeter.swift             Find/launch an app, get main window, focus a window
+      PrivateAX.swift               _AXUIElementGetWindow shim (AX element → CGWindowID)
+    Palette/
+      PaletteItem.swift             A selectable row (app to launch / window to focus)
+      AppCatalog.swift              Discover installed apps + on-screen windows
+      CommandPaletteController.swift Borderless floating NSPanel search UI
 Tests/TesseraCoreTests/             swift-testing unit tests for the core
 Resources/Info.plist                Bundle metadata (id, LSUIElement)
 scripts/build-app.sh                Build + package + codesign
@@ -80,8 +86,23 @@ move/resize a target app (Terminal/Safari) to exact coordinates via the menu.
 x/y/width/height for panes across horizontal/vertical splits, with outer/inner
 gaps and a per-window titlebar/border inset knob. Pure value type, 14 unit tests.
 
-Next milestones (see the flow task brief): command palette → tmux split logic
-→ virtual tabs (`kAXHiddenAttribute`) → global hotkeys (Carbon event taps).
+**Milestone 3 (command palette) — done.** Borderless floating `NSPanel` search
+bar listing installed apps (Applications-folder scan) and on-screen windows;
+type-to-filter via `FuzzyMatcher`, ↑/↓/Return/Esc, click-out to dismiss.
+Selecting launches an app or raises a window.
+
+Next milestones (see the flow task brief): tmux split logic → virtual tabs
+(`kAXHiddenAttribute`) → global hotkeys (Carbon event taps).
+
+## Reading window titles
+
+Window titles come from the **Accessibility** API (`kAXTitleAttribute` on each
+window element), not `CGWindowList`'s `kCGWindowName`. `kCGWindowName` is gated
+behind **Screen Recording** permission since macOS 10.15; AX titles need only
+the Accessibility grant Tessera already has. `AppCatalog` uses AX when trusted
+and falls back to `CGWindowList` (owner-name titles) otherwise. The private
+`_AXUIElementGetWindow` shim (in `PrivateAX.swift`) maps an AX window element to
+its `CGWindowID` for stable identity — the same symbol yabai/AeroSpace/Reef use.
 
 ## Gotchas
 
