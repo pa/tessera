@@ -18,8 +18,12 @@ private final class KeyablePanel: NSPanel {
 final class CommandPaletteController: NSObject {
     /// Invoked with the chosen item when the user commits a selection. The
     /// palette dismisses itself first. Callers wire this to launch/focus (M3)
-    /// or, later, snap the selection into a pane (M4).
+    /// or snap the selection into a pane (M4).
     var onSelect: ((PaletteItem) -> Void)?
+
+    /// Invoked when the palette is dismissed *without* a selection (Esc or
+    /// click-out). Lets a pending split roll itself back.
+    var onCancel: (() -> Void)?
 
     private var panel: KeyablePanel?
     private var searchField: NSTextField!
@@ -27,16 +31,20 @@ final class CommandPaletteController: NSObject {
 
     private var allItems: [PaletteItem] = []
     private var filtered: [PaletteItem] = []
+    private var committed = false
 
     private let panelSize = NSSize(width: 560, height: 360)
     private let rowHeight: CGFloat = 44
 
     // MARK: - Presentation
 
-    /// Load the catalog and show the palette centered on the main screen.
-    func present() {
+    /// Load the catalog and show the palette. Centered on the main screen by
+    /// default, or centered within `anchorRectAX` (an AX top-left rect — e.g. a
+    /// freshly-emptied pane) when provided.
+    func present(anchorRectAX: CGRect? = nil) {
         allItems = AppCatalog.allItems()
         filtered = allItems
+        committed = false
 
         let panel = self.panel ?? buildPanel()
         self.panel = panel
@@ -44,7 +52,11 @@ final class CommandPaletteController: NSObject {
         searchField.stringValue = ""
         tableView.reloadData()
         selectRow(0)
-        centerOnMainScreen(panel)
+        if let anchor = anchorRectAX {
+            center(panel, inAXRect: anchor)
+        } else {
+            centerOnMainScreen(panel)
+        }
 
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
@@ -53,6 +65,14 @@ final class CommandPaletteController: NSObject {
 
     func dismiss() {
         panel?.orderOut(nil)
+    }
+
+    /// Dismiss without a selection, notifying `onCancel` (unless a selection
+    /// was just committed).
+    private func cancel() {
+        let wasCommitted = committed
+        dismiss()
+        if !wasCommitted { onCancel?() }
     }
 
     // MARK: - Building the UI
@@ -151,6 +171,16 @@ final class CommandPaletteController: NSObject {
         panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
     }
 
+    /// Center the panel within an AX-space rect (converted to AppKit coords).
+    private func center(_ panel: NSPanel, inAXRect axRect: CGRect) {
+        let appKit = ScreenGeometry.appKitRect(fromAX: axRect)
+        let origin = NSPoint(
+            x: appKit.midX - panelSize.width / 2,
+            y: appKit.midY - panelSize.height / 2
+        )
+        panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
+    }
+
     // MARK: - Filtering & selection
 
     private func applyFilter(_ query: String) {
@@ -176,6 +206,7 @@ final class CommandPaletteController: NSObject {
         let row = tableView.selectedRow
         guard row >= 0, row < filtered.count else { return }
         let item = filtered[row]
+        committed = true
         dismiss()
         onSelect?(item)
     }
@@ -200,7 +231,7 @@ extension CommandPaletteController: NSTextFieldDelegate {
             commitSelection()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
-            dismiss()
+            cancel()
             return true
         default:
             return false
@@ -266,6 +297,6 @@ extension CommandPaletteController: NSTableViewDataSource, NSTableViewDelegate {
 
 extension CommandPaletteController: NSWindowDelegate {
     func windowDidResignKey(_ notification: Notification) {
-        dismiss()
+        cancel()
     }
 }

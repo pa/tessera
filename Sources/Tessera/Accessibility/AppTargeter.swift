@@ -70,9 +70,28 @@ enum AppTargeter {
     /// Raise a specific window (by CGWindowID) within its app and bring the app
     /// forward. Falls back to plain app activation if the window can't be found.
     static func focusWindow(pid: pid_t, windowID: CGWindowID) {
-        let appElement = AXUIElementCreateApplication(pid)
-        windows(of: appElement).first { $0.windowID == windowID }?.raise()
+        window(pid: pid, windowID: windowID)?.raise()
         NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+    }
+
+    /// Resolve a specific window element by its owning pid + CGWindowID, so a
+    /// window tracked by id can be re-fetched later to move/resize it.
+    static func window(pid: pid_t, windowID: CGWindowID) -> AXWindow? {
+        let appElement = AXUIElementCreateApplication(pid)
+        return windows(of: appElement).first { $0.windowID == windowID }
+    }
+
+    /// The focused window (or first window) of a specific application. Used to
+    /// find the window a split should act on, given the app Tessera last saw
+    /// activated.
+    static func focusedWindow(ofPID pid: pid_t) -> AXWindow? {
+        let appElement = AXUIElementCreateApplication(pid)
+        var focused: CFTypeRef?
+        if AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focused) == .success,
+           let focused {
+            return AXWindow(element: focused as! AXUIElement)
+        }
+        return windows(of: appElement).first
     }
 
     /// The app's primary window — the one the user would expect a "move this

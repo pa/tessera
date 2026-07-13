@@ -91,8 +91,34 @@ bar listing installed apps (Applications-folder scan) and on-screen windows;
 type-to-filter via `FuzzyMatcher`, ↑/↓/Return/Esc, click-out to dismiss.
 Selecting launches an app or raises a window.
 
-Next milestones (see the flow task brief): tmux split logic → virtual tabs
-(`kAXHiddenAttribute`) → global hotkeys (Carbon event taps).
+**Milestone 4 (tmux split logic) — done.** `TilingController` ties the pieces
+together: split the focused pane → BSP recompute → shrink the focused window
+into its half → render the empty pane (`EmptyPaneOverlay`) → pop the palette
+centered in it → snap the picked window into the pane. Splits originate from the
+live focused window (matched by CGWindowID, so same-app windows are
+distinguished); cancelling the palette rolls the split back. Menu: Split → Right
+(⌘D), Split → Down (⌘⇧D), Reset Tiling.
+
+Next milestones (see the flow task brief): virtual tabs (`kAXHiddenAttribute`)
+→ global hotkeys (Carbon event taps).
+
+## Tiling & the macOS z-order reality
+
+Window z-order on macOS is **per-application** — only one app is frontmost, so
+activating app B drops app A's windows behind it. This is invisible while tiles
+don't overlap (each window owns a distinct screen region) and only shows when an
+app refuses to shrink to its pane (enforces a minimum size) and spills over a
+neighbor — the brief's "uncooperative app" caveat. There is no API to keep two
+different apps' windows simultaneously topmost. `TilingController.focus` raises
+the whole managed set together so tiled windows stay above unmanaged clutter.
+
+**Stage Manager conflicts with tiling** (it hides non-active apps' windows) —
+keep it off, like every macOS tiling WM requires. State lives in
+`com.apple.WindowManager` `GloballyEnabled`.
+
+Coordinate spaces: the BSP engine and `AXWindow` work in AX top-left space;
+`NSWindow` placement (overlay, palette) is AppKit bottom-left. `ScreenGeometry`
+does the flip and computes the usable workspace rect (menu bar / Dock excluded).
 
 ## Reading window titles
 

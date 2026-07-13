@@ -12,11 +12,17 @@ import TesseraCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private lazy var commandPalette: CommandPaletteController = {
-        let palette = CommandPaletteController()
-        palette.onSelect = { [weak self] item in self?.activate(item) }
-        return palette
-    }()
+    private let commandPalette = CommandPaletteController()
+    private lazy var tiling = TilingController(palette: commandPalette) { [weak self] in
+        guard let pid = self?.lastActiveAppPID,
+              let window = AppTargeter.focusedWindow(ofPID: pid) else { return nil }
+        return (pid, window)
+    }
+
+    /// The most recently activated non-Tessera app. Tracked via workspace
+    /// notifications so a split knows which window to act on even while our
+    /// status-bar menu is open (when `frontmostApplication` is ambiguous).
+    private var lastActiveAppPID: pid_t?
 
     /// The currently-selected target application.
     private struct Target {
@@ -38,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Nudge the system Accessibility prompt on first launch. The grant lands
         // asynchronously; the menu reflects the live state each time it opens.
         AccessibilityAuthorizer.requestIfNeeded()
+
+        trackFrontmostApplication()
 
         let menu = NSMenu()
         menu.delegate = self
@@ -102,6 +110,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         palette.target = self
         menu.addItem(palette)
 
+        // Tiling / tmux split actions.
+        let tileHeader = NSMenuItem(title: "Tiling", action: nil, keyEquivalent: "")
+        tileHeader.isEnabled = false
+        menu.addItem(tileHeader)
+        let splitRight = NSMenuItem(title: "Split Focused → Right", action: #selector(splitRight), keyEquivalent: "d")
+        splitRight.keyEquivalentModifierMask = [.command]
+        splitRight.target = self
+        splitRight.isEnabled = trusted
+        menu.addItem(splitRight)
+        let splitDown = NSMenuItem(title: "Split Focused → Down", action: #selector(splitDown), keyEquivalent: "D")
+        splitDown.keyEquivalentModifierMask = [.command, .shift]
+        splitDown.target = self
+        splitDown.isEnabled = trusted
+        menu.addItem(splitDown)
+        let resetTiling = NSMenuItem(title: "Reset Tiling", action: #selector(resetTiling), keyEquivalent: "")
+        resetTiling.target = self
+        menu.addItem(resetTiling)
+
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Tessera", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
@@ -129,7 +155,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openCommandPalette() {
+        // Standalone palette: selecting just launches/focuses. Reset the
+        // callbacks each time so a prior split's handlers don't linger.
+        commandPalette.onSelect = { [weak self] item in self?.activate(item) }
+        commandPalette.onCancel = nil
         commandPalette.present()
+    }
+
+    @objc private func splitRight() { tiling.split(.horizontal) }
+    @objc private func splitDown() { tiling.split(.vertical) }
+    @objc private func resetTiling() { tiling.reset() }
+
+    /// Remember the most recent non-Tessera frontmost app, so a split acts on
+    /// the window the user was actually using.
+    private func trackFrontmostApplication() {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ownPID {
+            lastActiveAppPID = front.processIdentifier
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.processIdentifier != ownPID else { return }
+            MainActor.assumeIsolated { self?.lastActiveAppPID = app.processIdentifier }
+        }
     }
 
     /// Default palette action: bring the chosen app/window to the front. Later
