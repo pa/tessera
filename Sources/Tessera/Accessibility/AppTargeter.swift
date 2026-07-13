@@ -74,6 +74,20 @@ enum AppTargeter {
         NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
     }
 
+    /// Hide or show an entire application via `kAXHiddenAttribute` (the AX
+    /// equivalent of ⌘H). This is application-level — there is no per-window
+    /// hidden attribute — so it's the mechanism virtual tabs use to stash the
+    /// inactive tab's apps. An app whose windows span multiple tabs can only be
+    /// hidden/shown as a whole.
+    static func setHidden(_ hidden: Bool, pid: pid_t) {
+        let appElement = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(
+            appElement,
+            kAXHiddenAttribute as CFString,
+            (hidden ? kCFBooleanTrue : kCFBooleanFalse)
+        )
+    }
+
     /// Resolve a specific window element by its owning pid + CGWindowID, so a
     /// window tracked by id can be re-fetched later to move/resize it.
     static func window(pid: pid_t, windowID: CGWindowID) -> AXWindow? {

@@ -18,10 +18,32 @@ final class TilingController {
         let window: AXWindow
     }
 
-    private var tree = LayoutTree()
-    private var occupants: [PaneID: WindowRef] = [:]
-    private var focusedPane = PaneID(0)
+    /// A virtual tab: an independent BSP workspace. Switching tabs hides one
+    /// tab's apps and unhides the next's (`kAXHiddenAttribute`).
+    private struct Tab {
+        var tree = LayoutTree()
+        var occupants: [PaneID: WindowRef] = [:]
+        var focusedPane = PaneID(0)
+    }
+
+    private var tabs: [Tab] = [Tab()]
+    private var activeTabIndex = 0
     private var pendingPane: PaneID?
+
+    // The split/fill logic works against "the active tab" through these; making
+    // them computed keeps that code unchanged while the state lives per-tab.
+    private var tree: LayoutTree {
+        get { tabs[activeTabIndex].tree }
+        set { tabs[activeTabIndex].tree = newValue }
+    }
+    private var occupants: [PaneID: WindowRef] {
+        get { tabs[activeTabIndex].occupants }
+        set { tabs[activeTabIndex].occupants = newValue }
+    }
+    private var focusedPane: PaneID {
+        get { tabs[activeTabIndex].focusedPane }
+        set { tabs[activeTabIndex].focusedPane = newValue }
+    }
 
     private let palette: CommandPaletteController
     private let overlay = EmptyPaneOverlay()
@@ -78,14 +100,56 @@ final class TilingController {
         palette.present(anchorRectAX: paneRect)
     }
 
-    /// Tear down the tiling session and forget all panes (windows stay where
-    /// they are).
+    /// Tear down the tiling session: unhide every managed app across all tabs
+    /// and collapse back to a single empty tab. Windows stay where they are.
     func reset() {
-        tree = LayoutTree()
-        occupants.removeAll()
-        focusedPane = PaneID(0)
+        for tab in tabs {
+            for pid in pids(of: tab) { AppTargeter.setHidden(false, pid: pid) }
+        }
+        tabs = [Tab()]
+        activeTabIndex = 0
         pendingPane = nil
         overlay.hide()
+    }
+
+    // MARK: - Tabs
+
+    var tabSummary: (index: Int, count: Int) { (activeTabIndex, tabs.count) }
+
+    /// Open a fresh, empty tab: hide the current tab's apps and switch to the
+    /// new one. Splitting in the new tab adopts whatever window is frontmost.
+    func newTab() {
+        guard pendingPane == nil else { return }
+        hide(tabs[activeTabIndex])
+        tabs.append(Tab())
+        activeTabIndex = tabs.count - 1
+        overlay.hide()
+    }
+
+    func nextTab() { switchTo((activeTabIndex + 1) % tabs.count) }
+    func previousTab() { switchTo((activeTabIndex - 1 + tabs.count) % tabs.count) }
+
+    /// Switch to `index`: stash the current tab's apps, reveal the target tab's,
+    /// re-snap its layout, and focus its active pane.
+    func switchTo(_ index: Int) {
+        guard pendingPane == nil, index != activeTabIndex, tabs.indices.contains(index) else { return }
+        hide(tabs[activeTabIndex])
+        activeTabIndex = index
+        show(tabs[activeTabIndex])
+        relayout()
+        if let ref = occupants[focusedPane] { focus(ref) }
+    }
+
+    private func pids(of tab: Tab) -> Set<pid_t> {
+        Set(tab.occupants.values.map(\.pid))
+    }
+
+    private func hide(_ tab: Tab) {
+        for pid in pids(of: tab) { AppTargeter.setHidden(true, pid: pid) }
+    }
+
+    private func show(_ tab: Tab) {
+        for pid in pids(of: tab) { AppTargeter.setHidden(false, pid: pid) }
     }
 
     // MARK: - Palette outcomes

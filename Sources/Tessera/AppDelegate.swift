@@ -128,6 +128,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resetTiling.target = self
         menu.addItem(resetTiling)
 
+        // Virtual tabs.
+        let tabs = tiling.tabSummary
+        let tabHeader = NSMenuItem(title: "Tabs  (tab \(tabs.index + 1) of \(tabs.count))", action: nil, keyEquivalent: "")
+        tabHeader.isEnabled = false
+        menu.addItem(tabHeader)
+        let newTab = NSMenuItem(title: "New Tab", action: #selector(newTab), keyEquivalent: "t")
+        newTab.keyEquivalentModifierMask = [.command]
+        newTab.target = self
+        newTab.isEnabled = trusted
+        menu.addItem(newTab)
+        let nextTab = NSMenuItem(title: "Next Tab", action: #selector(nextTab), keyEquivalent: "]")
+        nextTab.keyEquivalentModifierMask = [.command, .shift]
+        nextTab.target = self
+        nextTab.isEnabled = trusted && tabs.count > 1
+        menu.addItem(nextTab)
+        let prevTab = NSMenuItem(title: "Previous Tab", action: #selector(previousTab), keyEquivalent: "[")
+        prevTab.keyEquivalentModifierMask = [.command, .shift]
+        prevTab.target = self
+        prevTab.isEnabled = trusted && tabs.count > 1
+        menu.addItem(prevTab)
+
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Tessera", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
@@ -165,6 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func splitRight() { tiling.split(.horizontal) }
     @objc private func splitDown() { tiling.split(.vertical) }
     @objc private func resetTiling() { tiling.reset() }
+    @objc private func newTab() { tiling.newTab() }
+    @objc private func nextTab() { tiling.nextTab() }
+    @objc private func previousTab() { tiling.previousTab() }
 
     /// Remember the most recent non-Tessera frontmost app, so a split acts on
     /// the window the user was actually using.

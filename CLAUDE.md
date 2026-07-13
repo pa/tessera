@@ -99,8 +99,16 @@ live focused window (matched by CGWindowID, so same-app windows are
 distinguished); cancelling the palette rolls the split back. Menu: Split → Right
 (⌘D), Split → Down (⌘⇧D), Reset Tiling.
 
-Next milestones (see the flow task brief): virtual tabs (`kAXHiddenAttribute`)
-→ global hotkeys (Carbon event taps).
+**Milestone 5 (virtual tabs) — done.** Each tab is an independent BSP workspace
+(`TilingController.Tab`: tree + occupants + focused pane). Switching hides the
+current tab's apps via `kAXHiddenAttribute` and unhides + re-snaps the target
+tab's. Menu: New Tab (⌘T), Next (⌘⇧]), Previous (⌘⇧[). Caveat: `kAXHiddenAttribute`
+is **application-level** (no per-window hidden attribute), so a tab is
+effectively a set of apps — an app spanning two tabs can't be hidden for only
+one. Distinct apps per tab switch cleanly.
+
+Next milestone (see the flow task brief): global hotkeys (Carbon event taps) so
+split/tab shortcuts fire regardless of the focused app.
 
 ## Tiling & the macOS z-order reality
 
