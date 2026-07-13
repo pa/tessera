@@ -27,8 +27,13 @@ can never reliably control windows. Always test through
 - Bundle id: `cloud.facets.tessera` (fixed, in `Resources/Info.plist`).
 - Default signing is **ad-hoc** (`-`). Ad-hoc signatures change every rebuild,
   so macOS re-prompts for Accessibility after each build. To make the grant
-  stick, create a self-signed "Code Signing" cert in Keychain Access and build
-  with `CODESIGN_IDENTITY="<cert name>" ./scripts/build-app.sh`.
+  stick, run `./scripts/create-signing-cert.sh` once — it creates a self-signed
+  "Tessera Code Signing" identity in a dedicated keychain (non-interactive) —
+  then build with `CODESIGN_IDENTITY="Tessera Code Signing" ./scripts/build-app.sh`.
+  The identity gives a stable Designated Requirement (`identifier
+  cloud.facets.tessera and certificate leaf = H"…"`) that TCC keys the grant to.
+  Switching signing identity (ad-hoc → cert, or regenerating the cert) requires
+  re-granting Accessibility once.
 
 ## Accessibility permission
 
@@ -46,27 +51,37 @@ flipping. `ScreenLayout` centralizes this.
 ## Layout / structure
 
 ```
-Sources/Tessera/
-  main.swift                        AppKit programmatic entry (menu-bar agent)
-  AppDelegate.swift                 Menu-bar UI + prototype actions
-  Accessibility/
-    AccessibilityAuthorizer.swift   AX trust check / prompt
-    AXWindow.swift                  Typed wrapper: read/set window position & size
-    AppTargeter.swift               Find (or launch) an app, get its main window
-  Geometry/
-    ScreenLayout.swift              Screen-relative placements (prototype)
+Sources/
+  TesseraCore/                      Pure, UI-independent logic (CoreGraphics only)
+    ScreenLayout.swift              Screen-relative named placements (prototype)
+    BSPLayout.swift                 BSP tree + LayoutTree: split/remove/resize → frames
+  Tessera/                          Menu-bar agent (AppKit + Accessibility)
+    main.swift                      AppKit programmatic entry (menu-bar agent)
+    AppDelegate.swift               Menu-bar UI + prototype actions
+    Accessibility/
+      AccessibilityAuthorizer.swift AX trust check / prompt
+      AXWindow.swift                Typed wrapper: read/set window position & size
+      AppTargeter.swift             Find (or launch) an app, get its main window
+Tests/TesseraCoreTests/             swift-testing unit tests for the core
 Resources/Info.plist                Bundle metadata (id, LSUIElement)
 scripts/build-app.sh                Build + package + codesign
+scripts/create-signing-cert.sh      One-time self-signed cert for a persistent AX grant
 ```
+
+Run the core tests with `swift test`. `TesseraCore` has no AppKit dependency,
+so the layout logic is testable without launching the agent.
 
 ## Status
 
 **Milestone 1 (Accessibility control prototype) — done.** Request permission and
 move/resize a target app (Terminal/Safari) to exact coordinates via the menu.
 
-Next milestones (see the flow task brief): BSP layout engine → command palette
-→ tmux split logic → virtual tabs (`kAXHiddenAttribute`) → global hotkeys
-(Carbon event taps).
+**Milestone 2 (BSP layout engine) — done.** `BSPLayout` computes exact
+x/y/width/height for panes across horizontal/vertical splits, with outer/inner
+gaps and a per-window titlebar/border inset knob. Pure value type, 14 unit tests.
+
+Next milestones (see the flow task brief): command palette → tmux split logic
+→ virtual tabs (`kAXHiddenAttribute`) → global hotkeys (Carbon event taps).
 
 ## Gotchas
 

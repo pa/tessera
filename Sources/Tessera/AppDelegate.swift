@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import TesseraCore
 
 /// Milestone 1 prototype driver.
 ///
