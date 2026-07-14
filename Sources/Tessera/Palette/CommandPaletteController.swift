@@ -40,9 +40,15 @@ final class CommandPaletteController: NSObject {
 
     /// Load the catalog and show the palette. Centered on the main screen by
     /// default, or centered within `anchorRectAX` (an AX top-left rect — e.g. a
-    /// freshly-emptied pane) when provided.
-    func present(anchorRectAX: CGRect? = nil) {
-        allItems = AppCatalog.allItems()
+    /// freshly-emptied pane) when provided. Windows whose CGWindowID is in
+    /// `excludingWindowIDs` are omitted (e.g. windows already tiled into a pane).
+    func present(anchorRectAX: CGRect? = nil, excludingWindowIDs: Set<CGWindowID> = []) {
+        allItems = AppCatalog.allItems().filter { item in
+            if case .window(let windowID) = item.kind {
+                return !excludingWindowIDs.contains(windowID)
+            }
+            return true
+        }
         filtered = allItems
         committed = false
 

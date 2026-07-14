@@ -15,9 +15,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let commandPalette = CommandPaletteController()
     private lazy var tiling = TilingController(palette: commandPalette) { [weak self] in
-        guard let pid = self?.lastActiveAppPID,
-              let window = AppTargeter.focusedWindow(ofPID: pid) else { return nil }
-        return (pid, window)
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        // Prefer the true system-wide focused window; fall back to the last
+        // active app only when the focused app is Tessera itself (e.g. its menu).
+        if let focused = AppTargeter.systemFocusedWindow(excludingPID: ownPID) {
+            return focused
+        }
+        if let pid = self?.lastActiveAppPID, let window = AppTargeter.focusedWindow(ofPID: pid) {
+            return (pid, window)
+        }
+        return nil
     }
 
     /// The most recently activated non-Tessera app. Tracked via workspace
@@ -26,24 +33,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastActiveAppPID: pid_t?
 
     private let hotKeys = HotKeyManager()
+    private let modeHUD = ModeHUD()
+    private lazy var modeEngine: ModeEngine = {
+        let engine = ModeEngine(tiling: tiling)
+        engine.onModeChange = { [weak self] mode in self?.applyMode(mode) }
+        return engine
+    }()
     private var bindingSet = HotKeyStore.load()
     private lazy var hotKeyPrefs: HotKeyPreferencesController = {
         let controller = HotKeyPreferencesController(bindingSet: bindingSet)
         controller.onChange = { [weak self] set in self?.applyBindings(set) }
         return controller
     }()
-
-    /// The currently-selected target application.
-    private struct Target {
-        let name: String
-        let bundleID: String
-    }
-    private let targets = [
-        Target(name: "Terminal", bundleID: "com.apple.Terminal"),
-        Target(name: "Safari", bundleID: "com.apple.Safari"),
-    ]
-    private var selectedTargetIndex = 0
-    private var selectedTarget: Target { targets[selectedTargetIndex] }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -56,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         trackFrontmostApplication()
         applyBindings(bindingSet)
+        modeEngine.start()
+        tiling.startEnforcing()
 
         let menu = NSMenu()
         menu.delegate = self
@@ -63,11 +66,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Restore any hidden apps and re-snap windows before exiting.
+        tiling.teardown()
+    }
+
     // MARK: - Menu
 
     /// Fill (or refill) the menu in place. Called on first build and again each
-    /// time the menu is about to open, so the Accessibility row and target
-    /// checkmarks always reflect live state.
+    /// time the menu is about to open, so the Accessibility row and live tab
+    /// count reflect current state.
     private func populate(_ menu: NSMenu) {
         menu.removeAllItems()
 
@@ -81,38 +89,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusRow.target = self
         statusRow.isEnabled = !trusted
         menu.addItem(statusRow)
-        menu.addItem(.separator())
-
-        // Target picker.
-        let targetHeader = NSMenuItem(title: "Target", action: nil, keyEquivalent: "")
-        targetHeader.isEnabled = false
-        menu.addItem(targetHeader)
-        for (index, target) in targets.enumerated() {
-            let item = NSMenuItem(title: target.name, action: #selector(selectTarget(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = index
-            item.state = index == selectedTargetIndex ? .on : .off
-            menu.addItem(item)
-        }
-        menu.addItem(.separator())
-
-        // Placement actions.
-        let actionHeader = NSMenuItem(title: "Move \(selectedTarget.name) to…", action: nil, keyEquivalent: "")
-        actionHeader.isEnabled = false
-        menu.addItem(actionHeader)
-        for placement in ScreenLayout.Placement.allCases {
-            let item = NSMenuItem(title: placement.rawValue, action: #selector(applyPlacement(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = placement.rawValue
-            item.isEnabled = trusted
-            menu.addItem(item)
-        }
-
-        // Exactness proof: a fixed off-grid rect, then read back the result.
-        let exact = NSMenuItem(title: "Exact test (100, 100, 900×620)", action: #selector(applyExactTest), keyEquivalent: "")
-        exact.target = self
-        exact.isEnabled = trusted
-        menu.addItem(exact)
 
         menu.addItem(.separator())
         // Tiling actions. The chord in each title reflects the live binding set;
@@ -133,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitDown.target = self
         splitDown.isEnabled = trusted
         menu.addItem(splitDown)
+        let changeWindow = NSMenuItem(title: "Change Pane Window…", action: #selector(changePaneWindow), keyEquivalent: "")
+        changeWindow.target = self
+        changeWindow.isEnabled = trusted
+        menu.addItem(changeWindow)
         let resetTiling = NSMenuItem(title: "Reset Tiling\(chordSuffix(.reset))", action: #selector(resetTiling), keyEquivalent: "")
         resetTiling.target = self
         menu.addItem(resetTiling)
@@ -169,21 +149,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityAuthorizer.openSettingsPane()
     }
 
-    @objc private func selectTarget(_ sender: NSMenuItem) {
-        selectedTargetIndex = sender.tag
-    }
-
-    @objc private func applyPlacement(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let placement = ScreenLayout.Placement(rawValue: raw) else { return }
-        let target = placement.frame(in: ScreenLayout.mainDisplayBounds)
-        moveSelectedTarget(to: target)
-    }
-
-    @objc private func applyExactTest() {
-        moveSelectedTarget(to: CGRect(x: 100, y: 100, width: 900, height: 620))
-    }
-
     @objc private func openCommandPalette() {
         // Standalone palette: selecting just launches/focuses. Reset the
         // callbacks each time so a prior split's handlers don't linger.
@@ -195,32 +160,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func splitRight() { tiling.split(.horizontal) }
     @objc private func splitDown() { tiling.split(.vertical) }
     @objc private func resetTiling() { tiling.reset() }
+    @objc private func changePaneWindow() { tiling.changeFocusedPaneWindow() }
     @objc private func newTab() { tiling.newTab() }
     @objc private func nextTab() { tiling.nextTab() }
     @objc private func previousTab() { tiling.previousTab() }
 
     @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
 
+    /// Reflect the active input mode in the menu-bar glyph and the HUD hint bar.
+    private func applyMode(_ mode: ModeEngine.Mode) {
+        statusItem.button?.title = mode.glyph
+        if let hint = mode.hudText {
+            modeHUD.show(hint)
+        } else {
+            modeHUD.hide()
+        }
+    }
+
     /// Register every global shortcut from the current binding set. Called at
     /// launch and whenever the user edits bindings in preferences.
     private func applyBindings(_ set: KeyBindingSet) {
         bindingSet = set
         hotKeys.unregisterAll()
-        for (command, binding) in set.bindings {
+        for (command, binding) in set.bindings where !TilingCommand.modeEntry.contains(command) {
             let modifiers = HotKeyManager.Modifiers(rawValue: binding.modifiers)
             hotKeys.register(keyCode: binding.keyCode, modifiers: modifiers, action: action(for: command))
         }
+        // Mode-entry chords are interpreted by the event tap, not the hot-key
+        // manager — hand them to the engine.
+        modeEngine.updateEntryChords(pane: chord(set.bindings[.enterPaneMode]),
+                                     tab: chord(set.bindings[.enterTabMode]),
+                                     resize: chord(set.bindings[.enterResizeMode]))
+    }
+
+    /// Convert a stored binding into an event-tap chord.
+    private func chord(_ binding: KeyBinding?) -> ModeEngine.Chord {
+        guard let binding else { return ModeEngine.Chord(keyCode: -1, flags: []) }
+        return ModeEngine.Chord(keyCode: Int64(binding.keyCode),
+                                flags: KeySymbols.cgFlags(fromCarbon: binding.modifiers))
     }
 
     private func action(for command: TilingCommand) -> () -> Void {
         switch command {
         case .splitRight: return { [weak self] in self?.tiling.split(.horizontal) }
         case .splitDown: return { [weak self] in self?.tiling.split(.vertical) }
+        case .focusLeft: return { [weak self] in self?.tiling.moveFocus(.left) }
+        case .focusDown: return { [weak self] in self?.tiling.moveFocus(.down) }
+        case .focusUp: return { [weak self] in self?.tiling.moveFocus(.up) }
+        case .focusRight: return { [weak self] in self?.tiling.moveFocus(.right) }
+        case .moveLeft: return { [weak self] in self?.tiling.moveWindow(.left) }
+        case .moveDown: return { [weak self] in self?.tiling.moveWindow(.down) }
+        case .moveUp: return { [weak self] in self?.tiling.moveWindow(.up) }
+        case .moveRight: return { [weak self] in self?.tiling.moveWindow(.right) }
         case .newTab: return { [weak self] in self?.tiling.newTab() }
         case .nextTab: return { [weak self] in self?.tiling.nextTab() }
         case .previousTab: return { [weak self] in self?.tiling.previousTab() }
         case .reset: return { [weak self] in self?.tiling.reset() }
         case .palette: return { [weak self] in self?.openCommandPalette() }
+        // Mode-entry is handled by the event tap, never registered here.
+        case .enterPaneMode, .enterTabMode, .enterResizeMode: return {}
         }
     }
 
@@ -265,59 +263,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func moveSelectedTarget(to rect: CGRect) {
-        guard AccessibilityAuthorizer.isTrusted else {
-            AccessibilityAuthorizer.requestIfNeeded()
-            return
-        }
-        let target = selectedTarget
-        do {
-            let window = try AppTargeter.mainWindow(bundleID: target.bundleID, launchIfNeeded: true)
-            let resulting = window.setFrame(rect)
-            report(target: target, requested: rect, resulting: resulting)
-        } catch {
-            presentAlert(title: "Couldn't move \(target.name)", message: "\(error)")
-        }
-    }
-
-    // MARK: - Feedback
-
-    private func report(target: Target, requested: CGRect, resulting: CGRect?) {
-        guard let resulting else {
-            presentAlert(title: "\(target.name) moved",
-                         message: "Requested \(format(requested)) but couldn't read back the result.")
-            return
-        }
-        // Prove exactness: an exact placement round-trips within a pixel; a
-        // clamped app (min-size enforced) shows a visible delta here.
-        let matches = abs(resulting.origin.x - requested.origin.x) < 1
-            && abs(resulting.origin.y - requested.origin.y) < 1
-            && abs(resulting.size.width - requested.size.width) < 1
-            && abs(resulting.size.height - requested.size.height) < 1
-        if matches { return } // silent success — the window moved exactly
-        presentAlert(
-            title: "\(target.name) resisted exact placement",
-            message: "Requested \(format(requested))\nGot \(format(resulting))\n\nThe app likely enforces a minimum size — this is the fallback case the brief calls out."
-        )
-    }
-
-    private func format(_ rect: CGRect) -> String {
-        String(format: "(%.0f, %.0f) %.0f×%.0f",
-               rect.origin.x, rect.origin.y, rect.size.width, rect.size.height)
-    }
-
-    private func presentAlert(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .informational
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
-    }
 }
 
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
+        // Retry installing the event tap in case Accessibility was granted after
+        // launch (start() is a no-op once installed).
+        modeEngine.start()
         populate(menu)
     }
 }

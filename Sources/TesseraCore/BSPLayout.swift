@@ -183,6 +183,85 @@ public indirect enum BSPNode: Sendable {
         return false
     }
 
+    /// Grow or shrink the pane `target` along an axis by `delta` (a ratio
+    /// fraction), adjusting the nearest ancestor split of that orientation —
+    /// whichever side the pane sits on. Unlike a directional resize, this always
+    /// works as long as the pane has *a* sibling along that axis, matching the
+    /// intuitive i3 "grow/shrink width/height".
+    ///
+    /// `axis == .horizontal` resizes width; `.vertical` resizes height.
+    public func resized(_ target: PaneID, axis: SplitOrientation, grow: Bool, by delta: CGFloat) -> BSPNode {
+        var adjusted = false
+
+        func recurse(_ node: BSPNode) -> (node: BSPNode, containsTarget: Bool) {
+            switch node {
+            case .leaf(let id):
+                return (node, id == target)
+            case .split(let orientation, let ratio, let a, let b):
+                let left = recurse(a)
+                let right = recurse(b)
+                var newRatio = ratio
+                if !adjusted, orientation == axis {
+                    if left.containsTarget {
+                        // Target is the first child; growing it raises the ratio.
+                        newRatio = (ratio + (grow ? delta : -delta)).clamped(to: BSPNode.ratioBounds)
+                        adjusted = true
+                    } else if right.containsTarget {
+                        // Target is the second child; its size is (1 - ratio), so
+                        // growing it lowers the ratio.
+                        newRatio = (ratio + (grow ? -delta : delta)).clamped(to: BSPNode.ratioBounds)
+                        adjusted = true
+                    }
+                }
+                return (.split(orientation: orientation, ratio: newRatio, first: left.node, second: right.node),
+                        left.containsTarget || right.containsTarget)
+            }
+        }
+        return recurse(self).node
+    }
+
+    /// Grow the pane `target` toward `direction` by `delta` (a ratio fraction),
+    /// by nudging the split ratio of the *nearest* ancestor split along that
+    /// axis on the correct side. No-op if the pane has no adjustable border in
+    /// that direction (e.g. it's already flush against that edge of the screen).
+    ///
+    /// "Grow right/down" moves the divider on the far side of the pane outward;
+    /// it requires the pane to sit in a split's `first` subtree. "Grow
+    /// left/up" requires it in the `second` subtree. This mirrors the intuitive
+    /// i3/AeroSpace "resize in a direction".
+    public func resized(_ target: PaneID, _ direction: PaneNavigation.Direction, by delta: CGFloat) -> BSPNode {
+        let axis: SplitOrientation = (direction == .left || direction == .right) ? .horizontal : .vertical
+        // For right/down the target must be the first (left/top) child and the
+        // ratio increases; for left/up it must be the second child and the ratio
+        // decreases.
+        let growFirst = (direction == .right || direction == .down)
+        let ratioDelta = growFirst ? delta : -delta
+        var adjusted = false
+
+        func recurse(_ node: BSPNode) -> (node: BSPNode, containsTarget: Bool) {
+            switch node {
+            case .leaf(let id):
+                return (node, id == target)
+            case .split(let orientation, let ratio, let a, let b):
+                let left = recurse(a)
+                let right = recurse(b)
+                var newRatio = ratio
+                if !adjusted, orientation == axis {
+                    if growFirst, left.containsTarget {
+                        newRatio = (ratio + ratioDelta).clamped(to: BSPNode.ratioBounds)
+                        adjusted = true
+                    } else if !growFirst, right.containsTarget {
+                        newRatio = (ratio + ratioDelta).clamped(to: BSPNode.ratioBounds)
+                        adjusted = true
+                    }
+                }
+                return (.split(orientation: orientation, ratio: newRatio, first: left.node, second: right.node),
+                        left.containsTarget || right.containsTarget)
+            }
+        }
+        return recurse(self).node
+    }
+
     /// Compute the window frame for every leaf, given the workspace `rect` and
     /// `config`. This is the engine's whole reason for existing: turn the tree
     /// into exact x/y/width/height for each pane.
@@ -246,6 +325,16 @@ public struct LayoutTree: Sendable {
 
     public mutating func resize(_ target: PaneID, toRatio ratio: CGFloat) {
         root = root.resizing(target, toRatio: ratio)
+    }
+
+    /// Grow `target` toward `direction` by `delta` (ratio fraction).
+    public mutating func resize(_ target: PaneID, _ direction: PaneNavigation.Direction, by delta: CGFloat) {
+        root = root.resized(target, direction, by: delta)
+    }
+
+    /// Grow/shrink `target`'s width (`.horizontal`) or height (`.vertical`).
+    public mutating func resize(_ target: PaneID, axis: SplitOrientation, grow: Bool, by delta: CGFloat) {
+        root = root.resized(target, axis: axis, grow: grow, by: delta)
     }
 
     public func frames(in rect: CGRect, config: LayoutConfig = .tight) -> [PaneID: CGRect] {

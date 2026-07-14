@@ -4,25 +4,48 @@ import Carbon.HIToolbox
 /// The tiling commands a hot key can be bound to.
 enum TilingCommand: String, CaseIterable, Codable {
     case splitRight, splitDown
+    case focusLeft, focusDown, focusUp, focusRight
+    case moveLeft, moveDown, moveUp, moveRight
     case newTab, nextTab, previousTab
     case reset
     case palette
+    case enterPaneMode, enterTabMode, enterResizeMode
 
     var title: String {
         switch self {
         case .splitRight: return "Split → Right"
         case .splitDown: return "Split → Down"
+        case .focusLeft: return "Focus Left"
+        case .focusDown: return "Focus Down"
+        case .focusUp: return "Focus Up"
+        case .focusRight: return "Focus Right"
+        case .moveLeft: return "Move Window Left"
+        case .moveDown: return "Move Window Down"
+        case .moveUp: return "Move Window Up"
+        case .moveRight: return "Move Window Right"
         case .newTab: return "New Tab"
         case .nextTab: return "Next Tab"
         case .previousTab: return "Previous Tab"
         case .reset: return "Reset Tiling"
         case .palette: return "Command Palette"
+        case .enterPaneMode: return "Enter Pane Mode"
+        case .enterTabMode: return "Enter Tab Mode"
+        case .enterResizeMode: return "Enter Resize Mode"
         }
     }
 
+    /// Commands that enter a modal layer (handled by the event tap, not the
+    /// global hot-key manager).
+    static let modeEntry: Set<TilingCommand> = [.enterPaneMode, .enterTabMode, .enterResizeMode]
+
     /// Stable display order for the preferences list.
     static var ordered: [TilingCommand] {
-        [.splitRight, .splitDown, .newTab, .nextTab, .previousTab, .palette, .reset]
+        [.enterPaneMode, .enterTabMode, .enterResizeMode,
+         .splitRight, .splitDown,
+         .focusLeft, .focusDown, .focusUp, .focusRight,
+         .moveLeft, .moveDown, .moveUp, .moveRight,
+         .newTab, .nextTab, .previousTab,
+         .palette, .reset]
     }
 }
 
@@ -56,31 +79,42 @@ struct KeyBindingSet: Codable, Equatable {
 
     // MARK: - Presets
 
-    /// Tessera default: ⌃⌥⌘ prefix on mnemonic keys.
-    static let tessera = KeyBindingSet(preset: .tessera, bindings: build(
-        modifiers: [.control, .option, .command],
-        keys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
-               .newTab: kVK_ANSI_T, .nextTab: kVK_ANSI_RightBracket,
-               .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
-               .palette: kVK_Space]
+    /// Focus movement is hjkl in every preset; window-move is ⇧ + hjkl.
+    private static let focusKeys: [TilingCommand: Int] = [
+        .focusLeft: kVK_ANSI_H, .focusDown: kVK_ANSI_J,
+        .focusUp: kVK_ANSI_K, .focusRight: kVK_ANSI_L,
+    ]
+    private static let moveKeys: [TilingCommand: Int] = [
+        .moveLeft: kVK_ANSI_H, .moveDown: kVK_ANSI_J,
+        .moveUp: kVK_ANSI_K, .moveRight: kVK_ANSI_L,
+    ]
+
+    /// Tessera default: ⌃⌥⌘ prefix, vim hjkl focus, ⇧+hjkl to move windows.
+    static let tessera = KeyBindingSet(preset: .tessera, bindings: assemble(
+        base: [.control, .option, .command],
+        baseKeys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
+                   .newTab: kVK_ANSI_T, .nextTab: kVK_ANSI_RightBracket,
+                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
+                   .palette: kVK_Space].merging(focusKeys) { a, _ in a }
     ))
 
-    /// tmux-inspired: ⌃⌥ prefix, tmux's letter mnemonics (c new, n/p next/prev).
-    static let tmux = KeyBindingSet(preset: .tmux, bindings: build(
-        modifiers: [.control, .option],
-        keys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
-               .newTab: kVK_ANSI_C, .nextTab: kVK_ANSI_N,
-               .previousTab: kVK_ANSI_P, .reset: kVK_ANSI_R,
-               .palette: kVK_Space]
+    /// tmux-inspired: ⌃⌥ prefix, tmux's letter mnemonics (c new, n/p next/prev),
+    /// hjkl focus, ⇧+hjkl move.
+    static let tmux = KeyBindingSet(preset: .tmux, bindings: assemble(
+        base: [.control, .option],
+        baseKeys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
+                   .newTab: kVK_ANSI_C, .nextTab: kVK_ANSI_N,
+                   .previousTab: kVK_ANSI_P, .reset: kVK_ANSI_R,
+                   .palette: kVK_Space].merging(focusKeys) { a, _ in a }
     ))
 
-    /// zellij-inspired: ⌥⌘ prefix, zellij's n/h/l style navigation.
-    static let zellij = KeyBindingSet(preset: .zellij, bindings: build(
-        modifiers: [.option, .command],
-        keys: [.splitRight: kVK_ANSI_L, .splitDown: kVK_ANSI_J,
-               .newTab: kVK_ANSI_N, .nextTab: kVK_ANSI_RightBracket,
-               .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
-               .palette: kVK_Space]
+    /// zellij-inspired: ⌥⌘ prefix, hjkl focus, =/- splits, ⇧+hjkl move.
+    static let zellij = KeyBindingSet(preset: .zellij, bindings: assemble(
+        base: [.option, .command],
+        baseKeys: [.splitRight: kVK_ANSI_Equal, .splitDown: kVK_ANSI_Minus,
+                   .newTab: kVK_ANSI_N, .nextTab: kVK_ANSI_RightBracket,
+                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
+                   .palette: kVK_Space].merging(focusKeys) { a, _ in a }
     ))
 
     static func preset(_ preset: Preset) -> KeyBindingSet {
@@ -92,9 +126,22 @@ struct KeyBindingSet: Codable, Equatable {
         }
     }
 
-    private static func build(modifiers: NSEvent.ModifierFlags, keys: [TilingCommand: Int]) -> [TilingCommand: KeyBinding] {
-        let mods = KeySymbols.carbonModifiers(from: modifiers)
-        return keys.mapValues { KeyBinding(keyCode: $0, modifiers: mods) }
+    /// Bind `baseKeys` at `base` modifiers and the shared move keys at
+    /// `base + ⇧` (so window-move mirrors focus with an added Shift). Mode-entry
+    /// keys are fixed at ⌃P / ⌃T across presets (zellij-style), rebindable in
+    /// preferences.
+    private static func assemble(base: NSEvent.ModifierFlags, baseKeys: [TilingCommand: Int]) -> [TilingCommand: KeyBinding] {
+        let baseMods = KeySymbols.carbonModifiers(from: base)
+        let moveMods = KeySymbols.carbonModifiers(from: base.union(.shift))
+        var result = baseKeys.mapValues { KeyBinding(keyCode: $0, modifiers: baseMods) }
+        for (command, keyCode) in moveKeys {
+            result[command] = KeyBinding(keyCode: keyCode, modifiers: moveMods)
+        }
+        let control = UInt32(controlKey)
+        result[.enterPaneMode] = KeyBinding(keyCode: kVK_ANSI_P, modifiers: control)
+        result[.enterTabMode] = KeyBinding(keyCode: kVK_ANSI_T, modifiers: control)
+        result[.enterResizeMode] = KeyBinding(keyCode: kVK_ANSI_R, modifiers: control)
+        return result
     }
 }
 
@@ -109,8 +156,14 @@ enum HotKeyStore {
 
     static func load() -> KeyBindingSet {
         guard let data = try? Data(contentsOf: url),
-              let set = try? JSONDecoder().decode(KeyBindingSet.self, from: data) else {
+              var set = try? JSONDecoder().decode(KeyBindingSet.self, from: data) else {
             return .tessera
+        }
+        // Backfill commands added since the file was written (custom falls back
+        // to the Tessera defaults) so new features aren't left unbound.
+        let defaults = KeyBindingSet.preset(set.preset).bindings
+        for command in TilingCommand.allCases where set.bindings[command] == nil {
+            set.bindings[command] = defaults[command]
         }
         return set
     }
@@ -130,6 +183,16 @@ enum HotKeyStore {
 // MARK: - Key symbol formatting & modifier conversion
 
 enum KeySymbols {
+    /// Convert a Carbon modifier mask to the `CGEventFlags` an event tap reports.
+    static func cgFlags(fromCarbon mods: UInt32) -> CGEventFlags {
+        var flags: CGEventFlags = []
+        if mods & UInt32(cmdKey) != 0 { flags.insert(.maskCommand) }
+        if mods & UInt32(shiftKey) != 0 { flags.insert(.maskShift) }
+        if mods & UInt32(optionKey) != 0 { flags.insert(.maskAlternate) }
+        if mods & UInt32(controlKey) != 0 { flags.insert(.maskControl) }
+        return flags
+    }
+
     static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
         var mods: UInt32 = 0
         if flags.contains(.command) { mods |= UInt32(cmdKey) }

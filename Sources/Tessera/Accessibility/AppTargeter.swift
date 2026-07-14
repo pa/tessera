@@ -75,10 +75,8 @@ enum AppTargeter {
     }
 
     /// Hide or show an entire application via `kAXHiddenAttribute` (the AX
-    /// equivalent of ⌘H). This is application-level — there is no per-window
-    /// hidden attribute — so it's the mechanism virtual tabs use to stash the
-    /// inactive tab's apps. An app whose windows span multiple tabs can only be
-    /// hidden/shown as a whole.
+    /// equivalent of ⌘H / "Hide Others"). Application-level, so it's used to
+    /// make a tiling tab exclusive: hide every app with no window in the tab.
     static func setHidden(_ hidden: Bool, pid: pid_t) {
         let appElement = AXUIElementCreateApplication(pid)
         AXUIElementSetAttributeValue(
@@ -88,6 +86,14 @@ enum AppTargeter {
         )
     }
 
+    /// All regular (Dock-present) running apps except Tessera itself.
+    static func regularApps() -> [NSRunningApplication] {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        return NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && $0.processIdentifier != ownPID
+        }
+    }
+
     /// Resolve a specific window element by its owning pid + CGWindowID, so a
     /// window tracked by id can be re-fetched later to move/resize it.
     static func window(pid: pid_t, windowID: CGWindowID) -> AXWindow? {
@@ -95,9 +101,34 @@ enum AppTargeter {
         return windows(of: appElement).first { $0.windowID == windowID }
     }
 
-    /// The focused window (or first window) of a specific application. Used to
-    /// find the window a split should act on, given the app Tessera last saw
-    /// activated.
+    /// The window that currently has keyboard focus system-wide, with its pid.
+    /// Read straight from the system-wide AX element, so it reflects the *actual*
+    /// focused window regardless of app-activation tracking — the reliable way
+    /// to know "what is the user in right now". Returns nil if the focused app is
+    /// `excludingPID` (i.e. Tessera itself, e.g. while its menu is open).
+    static func systemFocusedWindow(excludingPID: pid_t) -> (pid: pid_t, window: AXWindow)? {
+        let system = AXUIElementCreateSystemWide()
+        var appValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &appValue) == .success,
+              let appValue else { return nil }
+        let appElement = appValue as! AXUIElement
+
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(appElement, &pid) == .success, pid != excludingPID else { return nil }
+
+        var windowValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success,
+           let windowValue {
+            return (pid, AXWindow(element: windowValue as! AXUIElement))
+        }
+        if let first = windows(of: appElement).first {
+            return (pid, first)
+        }
+        return nil
+    }
+
+    /// The focused window (or first window) of a specific application. Used as a
+    /// fallback when the system-wide focused app is Tessera itself.
     static func focusedWindow(ofPID pid: pid_t) -> AXWindow? {
         let appElement = AXUIElementCreateApplication(pid)
         var focused: CFTypeRef?

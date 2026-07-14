@@ -29,6 +29,8 @@ final class TilingController {
     private var tabs: [Tab] = [Tab()]
     private var activeTabIndex = 0
     private var pendingPane: PaneID?
+    /// Where to return if the new-tab window picker is cancelled.
+    private var newTabReturnIndex: Int?
 
     // The split/fill logic works against "the active tab" through these; making
     // them computed keeps that code unchanged while the state lives per-tab.
@@ -59,10 +61,128 @@ final class TilingController {
 
     private var workspaceRect: CGRect { ScreenGeometry.mainUsableBounds }
 
+    /// Periodically re-snaps drifted windows and drops closed ones.
+    private var enforcementTimer: Timer?
+
+    /// Non-tiled windows of managed apps that we've parked off-screen (so only
+    /// the tiled window of a multi-window app shows), keyed by CGWindowID with
+    /// their original frame for restoration on reset/quit.
+    private var parkedExtras: [CGWindowID: (window: AXWindow, frame: CGRect)] = [:]
+
     init(palette: CommandPaletteController,
          focusedWindowProvider: @escaping () -> (pid: pid_t, window: AXWindow)?) {
         self.palette = palette
         self.focusedWindowProvider = focusedWindowProvider
+    }
+
+    // MARK: - Workspace exclusivity (hide others)
+
+    /// Make the active tab exclusive: hide every app with no tiled window; for an
+    /// app that *does* have a tiled window, keep it visible but park its other
+    /// (non-tiled) windows off-screen so only the tiled one shows. With no tiles,
+    /// reveal everything.
+    private func applyWorkspaceVisibility() {
+        let managedPIDs = Set(occupants.values.map(\.pid))
+        let managedWindowIDs = Set(occupants.values.compactMap { $0.window.windowID })
+
+        for app in AppTargeter.regularApps() {
+            let pid = app.processIdentifier
+            if managedPIDs.contains(pid) {
+                AppTargeter.setHidden(false, pid: pid)
+                parkExtraWindows(pid: pid, keeping: managedWindowIDs)
+            } else if !managedPIDs.isEmpty {
+                AppTargeter.setHidden(true, pid: pid)
+            } else {
+                AppTargeter.setHidden(false, pid: pid)
+            }
+        }
+    }
+
+    /// Park every window of `pid` whose id isn't in `keeping` off-screen,
+    /// recording its frame once so it can be restored later. Already-parked
+    /// windows are left alone (no re-move, so no flicker).
+    private func parkExtraWindows(pid: pid_t, keeping managedWindowIDs: Set<CGWindowID>) {
+        let appElement = AXUIElementCreateApplication(pid)
+        for window in AppTargeter.windows(of: appElement) {
+            guard let windowID = window.windowID,
+                  !managedWindowIDs.contains(windowID),
+                  parkedExtras[windowID] == nil,
+                  let frame = window.frame else { continue }
+            parkedExtras[windowID] = (window, frame)
+            window.setPosition(offscreenPoint)
+        }
+    }
+
+    private func restoreParkedExtras() {
+        for (_, parked) in parkedExtras where parked.window.isAlive {
+            parked.window.setFrame(parked.frame)
+        }
+        parkedExtras.removeAll()
+    }
+
+    private func unhideAllApps() {
+        for app in AppTargeter.regularApps() {
+            AppTargeter.setHidden(false, pid: app.processIdentifier)
+        }
+    }
+
+    // MARK: - Layout enforcement
+
+    /// Start the timer that drops closed windows and re-snaps drifted ones.
+    func startEnforcing() {
+        enforcementTimer?.invalidate()
+        enforcementTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.maintainLayout() }
+        }
+    }
+
+    private func maintainLayout() {
+        guard pendingPane == nil else { return } // don't disturb a split-in-progress
+        removeClosedWindows()
+        enforceLayout()
+    }
+
+    /// Drop panes whose window was closed; the BSP tree collapses so the
+    /// surviving neighbor expands to fill the freed space.
+    private func removeClosedWindows() {
+        let dead = occupants.compactMap { pane, ref in ref.window.isAlive ? nil : pane }
+        guard !dead.isEmpty else { return }
+        for pane in dead {
+            tree.remove(pane)
+            occupants[pane] = nil
+        }
+        if occupants[focusedPane] == nil {
+            focusedPane = tree.paneIDs.first ?? PaneID(0)
+        }
+        relayout()
+        applyWorkspaceVisibility()
+    }
+
+    /// Re-snap any active-tab window that has drifted from its pane frame (the
+    /// user resized/moved it outside Tessera). Windows already at their frame are
+    /// left alone, so this never fights our own layout changes.
+    private func enforceLayout() {
+        let frames = self.frames()
+        for (pane, ref) in occupants {
+            guard let expected = frames[pane], let current = ref.window.frame else { continue }
+            if !current.approximatelyEqual(to: expected, tolerance: 8) {
+                ref.window.setFrame(expected)
+            }
+        }
+    }
+
+    /// Unhide every app and bring all managed windows back on-screen — for quit.
+    func teardown() {
+        enforcementTimer?.invalidate()
+        enforcementTimer = nil
+        for tab in tabs {
+            let frames = tab.tree.frames(in: workspaceRect, config: config)
+            for (pane, ref) in tab.occupants {
+                if let rect = frames[pane] { ref.window.setFrame(rect) }
+            }
+        }
+        restoreParkedExtras()
+        unhideAllApps()
     }
 
     // MARK: - Public actions (wired to menu / hotkeys)
@@ -90,6 +210,7 @@ final class TilingController {
 
         guard let newPane = tree.split(focusedPane, orientation: orientation) else { return }
         relayout() // focused window shrinks into its half now
+        applyWorkspaceVisibility() // clean surface behind the palette
 
         pendingPane = newPane
         guard let paneRect = frames()[newPane] else { return }
@@ -97,59 +218,181 @@ final class TilingController {
 
         palette.onSelect = { [weak self] item in self?.fill(newPane, with: item) }
         palette.onCancel = { [weak self] in self?.cancelPending() }
-        palette.present(anchorRectAX: paneRect)
+        palette.present(anchorRectAX: paneRect, excludingWindowIDs: occupiedWindowIDs())
     }
 
-    /// Tear down the tiling session: unhide every managed app across all tabs
-    /// and collapse back to a single empty tab. Windows stay where they are.
+    /// Re-pick the window occupying the focused pane (e.g. you chose the wrong
+    /// one). Opens the palette over that pane; selecting replaces the occupant,
+    /// cancelling keeps the current window.
+    func changeFocusedPaneWindow() {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        let pane = focusedPane
+        guard occupants[pane] != nil, let rect = frames()[pane] else { return }
+        pendingPane = pane
+        overlay.show(inAXRect: rect)
+        palette.onSelect = { [weak self] item in self?.fill(pane, with: item) }
+        palette.onCancel = { [weak self] in
+            self?.pendingPane = nil
+            self?.overlay.hide()
+        }
+        palette.present(anchorRectAX: rect, excludingWindowIDs: occupiedWindowIDs())
+    }
+
+    /// Convenience for modal keys: move the window when `move` is true, else
+    /// just move focus.
+    func moveOrFocus(_ direction: PaneNavigation.Direction, move: Bool) {
+        if move { moveWindow(direction) } else { moveFocus(direction) }
+    }
+
+    /// Grow or shrink the focused pane's width/height and re-snap the affected
+    /// windows. Works regardless of which side of its split the pane is on.
+    func resizeFocused(axis: SplitOrientation, grow: Bool, by delta: CGFloat = 0.05) {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        var tab = tabs[activeTabIndex]
+        tab.tree.resize(focusedPane, axis: axis, grow: grow, by: delta)
+        tabs[activeTabIndex] = tab
+        relayout()
+    }
+
+    /// Move focus to the pane adjacent to the current one and activate its
+    /// window. The current pane is resolved from the live focused window first,
+    /// so navigation is relative to where the user actually is.
+    func moveFocus(_ direction: PaneNavigation.Direction) {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        guard let target = PaneNavigation.adjacent(to: focusedPane, in: frames(), direction: direction),
+              let ref = occupants[target] else { return }
+        focusedPane = target
+        focus(ref)
+    }
+
+    /// Swap the focused pane's window with the pane adjacent in `direction`,
+    /// then follow the moved window to its new pane. Repositions both windows.
+    func moveWindow(_ direction: PaneNavigation.Direction) {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        let source = focusedPane
+        guard let target = PaneNavigation.adjacent(to: source, in: frames(), direction: direction),
+              occupants[source] != nil else { return }
+
+        let moved = occupants[source]
+        occupants[source] = occupants[target]
+        occupants[target] = moved
+        focusedPane = target // follow the window we just moved
+        relayout()
+        if let ref = occupants[target] { focus(ref) }
+    }
+
+    /// If the live focused window is one we manage, make its pane the active one.
+    private func syncFocusFromLiveWindow() {
+        if let focused = focusedWindowProvider(),
+           let windowID = focused.window.windowID,
+           let pane = pane(containing: windowID) {
+            focusedPane = pane
+        }
+    }
+
+    /// CGWindowIDs already occupying a pane in any tab — the palette excludes
+    /// these so a window can't be placed into two panes.
+    func occupiedWindowIDs() -> Set<CGWindowID> {
+        var ids = Set<CGWindowID>()
+        for tab in tabs {
+            for ref in tab.occupants.values {
+                if let id = ref.window.windowID { ids.insert(id) }
+            }
+        }
+        return ids
+    }
+
+    /// Tear down the tiling session: bring every tab's windows back on-screen
+    /// (some are parked off-screen while their tab is inactive) and collapse to a
+    /// single empty tab.
     func reset() {
         for tab in tabs {
-            for pid in pids(of: tab) { AppTargeter.setHidden(false, pid: pid) }
+            let frames = tab.tree.frames(in: workspaceRect, config: config)
+            for (pane, ref) in tab.occupants {
+                if let rect = frames[pane] { ref.window.setFrame(rect) }
+            }
         }
         tabs = [Tab()]
         activeTabIndex = 0
         pendingPane = nil
+        newTabReturnIndex = nil
         overlay.hide()
+        restoreParkedExtras()
+        unhideAllApps() // no tiles left → reveal everything
     }
 
     // MARK: - Tabs
 
     var tabSummary: (index: Int, count: Int) { (activeTabIndex, tabs.count) }
 
-    /// Open a fresh, empty tab: hide the current tab's apps and switch to the
-    /// new one. Splitting in the new tab adopts whatever window is frontmost.
+    /// Open a fresh tab: hide the current tab's apps, then pop the palette to
+    /// pick the window that fills the new tab. Cancelling returns to the tab you
+    /// came from (so you never get stranded on a blank workspace).
     func newTab() {
         guard pendingPane == nil else { return }
+        let previousIndex = activeTabIndex
         hide(tabs[activeTabIndex])
         tabs.append(Tab())
         activeTabIndex = tabs.count - 1
+
+        let firstPane = PaneID(0)
+        pendingPane = firstPane
+        newTabReturnIndex = previousIndex
+        guard let paneRect = frames()[firstPane] else { return }
+        overlay.show(inAXRect: paneRect)
+        palette.onSelect = { [weak self] item in self?.fill(firstPane, with: item) }
+        palette.onCancel = { [weak self] in self?.cancelNewTab() }
+        palette.present(anchorRectAX: paneRect, excludingWindowIDs: occupiedWindowIDs())
+    }
+
+    /// Roll back a new tab whose window picker was dismissed: drop the empty tab
+    /// and return to (and reveal) the previous one.
+    private func cancelNewTab() {
         overlay.hide()
+        pendingPane = nil
+        guard let returnIndex = newTabReturnIndex, tabs.count > 1 else {
+            newTabReturnIndex = nil
+            return
+        }
+        newTabReturnIndex = nil
+        tabs.removeLast()
+        activeTabIndex = min(returnIndex, tabs.count - 1)
+        relayout() // brings the returned tab's windows back on-screen
+        if let ref = occupants[focusedPane] { focus(ref) }
+        applyWorkspaceVisibility()
     }
 
     func nextTab() { switchTo((activeTabIndex + 1) % tabs.count) }
     func previousTab() { switchTo((activeTabIndex - 1 + tabs.count) % tabs.count) }
 
-    /// Switch to `index`: stash the current tab's apps, reveal the target tab's,
-    /// re-snap its layout, and focus its active pane.
+    /// Switch to `index`: stash the current tab's windows off-screen, reveal the
+    /// target tab's (relayout snaps them back), and focus its active pane.
     func switchTo(_ index: Int) {
         guard pendingPane == nil, index != activeTabIndex, tabs.indices.contains(index) else { return }
         hide(tabs[activeTabIndex])
         activeTabIndex = index
-        show(tabs[activeTabIndex])
-        relayout()
+        relayout() // moves the incoming tab's windows from off-screen back to their panes
         if let ref = occupants[focusedPane] { focus(ref) }
+        applyWorkspaceVisibility()
     }
 
-    private func pids(of tab: Tab) -> Set<pid_t> {
-        Set(tab.occupants.values.map(\.pid))
+    /// A parking spot one full display-height below the screen. Hiding a tab
+    /// moves its windows here — per-window, so it correctly hides one window of
+    /// an app while another window of the *same* app stays visible in another
+    /// tab (which `kAXHiddenAttribute`, being app-level, cannot do).
+    private var offscreenPoint: CGPoint {
+        let bounds = ScreenLayout.mainDisplayBounds
+        return CGPoint(x: bounds.minX, y: bounds.maxY + bounds.height)
     }
 
     private func hide(_ tab: Tab) {
-        for pid in pids(of: tab) { AppTargeter.setHidden(true, pid: pid) }
-    }
-
-    private func show(_ tab: Tab) {
-        for pid in pids(of: tab) { AppTargeter.setHidden(false, pid: pid) }
+        for ref in tab.occupants.values {
+            ref.window.setPosition(offscreenPoint)
+        }
     }
 
     // MARK: - Palette outcomes
@@ -157,6 +400,7 @@ final class TilingController {
     private func fill(_ pane: PaneID, with item: PaletteItem) {
         overlay.hide()
         pendingPane = nil
+        newTabReturnIndex = nil
 
         guard let ref = resolve(item) else {
             cancelPending() // couldn't resolve a window — undo the split
@@ -166,6 +410,7 @@ final class TilingController {
         focusedPane = pane
         relayout()
         focus(ref)
+        applyWorkspaceVisibility()
     }
 
     /// Bring the tiled set forward as a group, then activate the focused pane's
@@ -225,5 +470,16 @@ final class TilingController {
                   let pid = AppTargeter.runningApp(bundleID: bundleID)?.processIdentifier else { return nil }
             return WindowRef(pid: pid, window: window)
         }
+    }
+}
+
+private extension CGRect {
+    /// True if every edge is within `tolerance` points of `other` — used to tell
+    /// a genuine external drift from the sub-pixel noise of our own placement.
+    func approximatelyEqual(to other: CGRect, tolerance: CGFloat) -> Bool {
+        abs(minX - other.minX) <= tolerance
+            && abs(minY - other.minY) <= tolerance
+            && abs(width - other.width) <= tolerance
+            && abs(height - other.height) <= tolerance
     }
 }

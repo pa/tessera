@@ -126,6 +126,31 @@ enhancement.
 
 All six brief milestones are complete.
 
+**WM enhancements (zellij/AeroSpace-inspired, post-brief).**
+- **Pane navigation & move** — directional focus (`PaneNavigation`, pure + tested)
+  and window-swap between panes.
+- **Directional resize** — grow/shrink the focused pane by nudging the nearest
+  ancestor split ratio (`BSPNode.resized(axis:grow:)`, pure + tested); the
+  adjacent pane follows automatically. No constraint solver (unlike zellij).
+- **Modal input** — `ModeEngine` (a single `CGEventTap`) implements zellij-style
+  modes: ⌃P pane, ⌃T tab, ⌃R resize (entry keys configurable). Strict capture
+  while in a mode; menu-bar glyph (`▚ P/T/R`) + `ModeHUD` hint bar. State-switch
+  entry, so re-entry is reliable (a `RegisterEventHotKey` per-mode approach was
+  not — it silently failed to re-arm).
+- **Exclusive tabs (hide others)** — a tab shows only its tiled windows; other
+  apps are `kAXHidden`, and a managed app's *other* windows are parked
+  off-screen (`kAXHidden` is app-level; per-window parking covers multi-window
+  apps). Restored on Reset / quit.
+- **Layout enforcement** — a 0.6s timer re-snaps windows dragged/resized outside
+  Tessera and removes panes whose window was closed (BSP collapse → neighbor
+  fills).
+- **Change Pane Window** — re-pick the focused pane's window via the palette.
+- New Tab pops the palette for its first window; tab hide/show is per-window
+  off-screen parking (see "z-order reality" caveat — still bounded by apps that
+  clamp window position on-screen).
+
+Roadmap: full-screen (zoom) a pane; free-moving floating panes.
+
 ## Tiling & the macOS z-order reality
 
 Window z-order on macOS is **per-application** — only one app is frontmost, so

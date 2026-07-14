@@ -46,6 +46,13 @@ struct AXWindow {
         return _AXUIElementGetWindow(element, &wid) == .success ? wid : nil
     }
 
+    /// False once the underlying window has been closed (the AX element goes
+    /// invalid). Used to detect a pane whose window the user closed.
+    var isAlive: Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value) != .invalidUIElement
+    }
+
     /// Bring this window to the front of its application's window stack.
     @discardableResult
     func raise() -> AXError {

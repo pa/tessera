@@ -25,8 +25,14 @@ final class HotKeyManager {
     private var handlerRef: EventHandlerRef?
     private var nextID: UInt32 = 1
 
-    /// A four-char signature identifying Tessera's hot keys ('TSSR').
-    private let signature: OSType = 0x54535352
+    /// Four-char signature identifying this manager's hot keys. Multiple managers
+    /// install handlers on the same event target, so each filters events to its
+    /// own signature to avoid cross-firing.
+    private let signature: OSType
+
+    init(signature: OSType = 0x54535352) {
+        self.signature = signature
+    }
 
     /// Remove every registered hot key (keeps the installed event handler).
     /// Call before re-applying a changed binding set.
@@ -87,7 +93,10 @@ final class HotKeyManager {
             )
             guard err == noErr else { return noErr }
             let id = hotKeyID.id
+            let eventSignature = hotKeyID.signature
             let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+            // Ignore events belonging to a different manager's signature.
+            guard eventSignature == manager.signature else { return noErr }
             // Hot key events arrive on the main run loop already, but hop
             // explicitly to satisfy main-actor isolation.
             DispatchQueue.main.async {

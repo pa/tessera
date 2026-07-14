@@ -40,6 +40,12 @@ cp "$BIN_PATH/Tessera" "$APP/Contents/MacOS/Tessera"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 echo "==> codesign (identity: $IDENTITY)"
+# The self-signed identity lives in a dedicated keychain that can re-lock
+# between sessions; unlock it so codesign can reach the private key (otherwise
+# it fails with errSecInternalComponent). No-op for ad-hoc signing.
+if [ "$IDENTITY" != "-" ]; then
+    security unlock-keychain -p "tessera-signing" "tessera-signing.keychain" 2>/dev/null || true
+fi
 codesign --force --sign "$IDENTITY" --timestamp=none "$APP"
 codesign --verify --verbose "$APP" || true
 
