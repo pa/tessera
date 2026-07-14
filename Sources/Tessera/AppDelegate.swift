@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import TesseraCore
 
 /// Milestone 1 prototype driver.
@@ -24,6 +25,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// status-bar menu is open (when `frontmostApplication` is ambiguous).
     private var lastActiveAppPID: pid_t?
 
+    private let hotKeys = HotKeyManager()
+    private var bindingSet = HotKeyStore.load()
+    private lazy var hotKeyPrefs: HotKeyPreferencesController = {
+        let controller = HotKeyPreferencesController(bindingSet: bindingSet)
+        controller.onChange = { [weak self] set in self?.applyBindings(set) }
+        return controller
+    }()
+
     /// The currently-selected target application.
     private struct Target {
         let name: String
@@ -46,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityAuthorizer.requestIfNeeded()
 
         trackFrontmostApplication()
+        applyBindings(bindingSet)
 
         let menu = NSMenu()
         menu.delegate = self
@@ -105,26 +115,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(exact)
 
         menu.addItem(.separator())
-        let palette = NSMenuItem(title: "Command Palette…", action: #selector(openCommandPalette), keyEquivalent: " ")
-        palette.keyEquivalentModifierMask = [.command]
+        // Tiling actions. The chord in each title reflects the live binding set;
+        // the actual shortcut is handled globally by HotKeyManager, so menu
+        // items carry no key-equivalent (which would only fire when active).
+        let palette = NSMenuItem(title: "Command Palette…\(chordSuffix(.palette))", action: #selector(openCommandPalette), keyEquivalent: "")
         palette.target = self
         menu.addItem(palette)
 
-        // Tiling / tmux split actions.
         let tileHeader = NSMenuItem(title: "Tiling", action: nil, keyEquivalent: "")
         tileHeader.isEnabled = false
         menu.addItem(tileHeader)
-        let splitRight = NSMenuItem(title: "Split Focused → Right", action: #selector(splitRight), keyEquivalent: "d")
-        splitRight.keyEquivalentModifierMask = [.command]
+        let splitRight = NSMenuItem(title: "Split Focused → Right\(chordSuffix(.splitRight))", action: #selector(splitRight), keyEquivalent: "")
         splitRight.target = self
         splitRight.isEnabled = trusted
         menu.addItem(splitRight)
-        let splitDown = NSMenuItem(title: "Split Focused → Down", action: #selector(splitDown), keyEquivalent: "D")
-        splitDown.keyEquivalentModifierMask = [.command, .shift]
+        let splitDown = NSMenuItem(title: "Split Focused → Down\(chordSuffix(.splitDown))", action: #selector(splitDown), keyEquivalent: "")
         splitDown.target = self
         splitDown.isEnabled = trusted
         menu.addItem(splitDown)
-        let resetTiling = NSMenuItem(title: "Reset Tiling", action: #selector(resetTiling), keyEquivalent: "")
+        let resetTiling = NSMenuItem(title: "Reset Tiling\(chordSuffix(.reset))", action: #selector(resetTiling), keyEquivalent: "")
         resetTiling.target = self
         menu.addItem(resetTiling)
 
@@ -133,23 +142,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tabHeader = NSMenuItem(title: "Tabs  (tab \(tabs.index + 1) of \(tabs.count))", action: nil, keyEquivalent: "")
         tabHeader.isEnabled = false
         menu.addItem(tabHeader)
-        let newTab = NSMenuItem(title: "New Tab", action: #selector(newTab), keyEquivalent: "t")
-        newTab.keyEquivalentModifierMask = [.command]
+        let newTab = NSMenuItem(title: "New Tab\(chordSuffix(.newTab))", action: #selector(newTab), keyEquivalent: "")
         newTab.target = self
         newTab.isEnabled = trusted
         menu.addItem(newTab)
-        let nextTab = NSMenuItem(title: "Next Tab", action: #selector(nextTab), keyEquivalent: "]")
-        nextTab.keyEquivalentModifierMask = [.command, .shift]
+        let nextTab = NSMenuItem(title: "Next Tab\(chordSuffix(.nextTab))", action: #selector(nextTab), keyEquivalent: "")
         nextTab.target = self
         nextTab.isEnabled = trusted && tabs.count > 1
         menu.addItem(nextTab)
-        let prevTab = NSMenuItem(title: "Previous Tab", action: #selector(previousTab), keyEquivalent: "[")
-        prevTab.keyEquivalentModifierMask = [.command, .shift]
+        let prevTab = NSMenuItem(title: "Previous Tab\(chordSuffix(.previousTab))", action: #selector(previousTab), keyEquivalent: "")
         prevTab.target = self
         prevTab.isEnabled = trusted && tabs.count > 1
         menu.addItem(prevTab)
 
         menu.addItem(.separator())
+        let hotkeySettings = NSMenuItem(title: "Hotkey Settings…", action: #selector(openHotKeyPreferences), keyEquivalent: "")
+        hotkeySettings.target = self
+        menu.addItem(hotkeySettings)
         menu.addItem(NSMenuItem(title: "Quit Tessera", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -189,6 +198,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func newTab() { tiling.newTab() }
     @objc private func nextTab() { tiling.nextTab() }
     @objc private func previousTab() { tiling.previousTab() }
+
+    @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
+
+    /// Register every global shortcut from the current binding set. Called at
+    /// launch and whenever the user edits bindings in preferences.
+    private func applyBindings(_ set: KeyBindingSet) {
+        bindingSet = set
+        hotKeys.unregisterAll()
+        for (command, binding) in set.bindings {
+            let modifiers = HotKeyManager.Modifiers(rawValue: binding.modifiers)
+            hotKeys.register(keyCode: binding.keyCode, modifiers: modifiers, action: action(for: command))
+        }
+    }
+
+    private func action(for command: TilingCommand) -> () -> Void {
+        switch command {
+        case .splitRight: return { [weak self] in self?.tiling.split(.horizontal) }
+        case .splitDown: return { [weak self] in self?.tiling.split(.vertical) }
+        case .newTab: return { [weak self] in self?.tiling.newTab() }
+        case .nextTab: return { [weak self] in self?.tiling.nextTab() }
+        case .previousTab: return { [weak self] in self?.tiling.previousTab() }
+        case .reset: return { [weak self] in self?.tiling.reset() }
+        case .palette: return { [weak self] in self?.openCommandPalette() }
+        }
+    }
+
+    /// The current chord for a command, formatted for a menu title suffix.
+    private func chordSuffix(_ command: TilingCommand) -> String {
+        bindingSet.bindings[command].map { "  (\($0.display))" } ?? ""
+    }
 
     /// Remember the most recent non-Tessera frontmost app, so a split acts on
     /// the window the user was actually using.

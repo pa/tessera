@@ -102,13 +102,29 @@ distinguished); cancelling the palette rolls the split back. Menu: Split → Rig
 **Milestone 5 (virtual tabs) — done.** Each tab is an independent BSP workspace
 (`TilingController.Tab`: tree + occupants + focused pane). Switching hides the
 current tab's apps via `kAXHiddenAttribute` and unhides + re-snaps the target
-tab's. Menu: New Tab (⌘T), Next (⌘⇧]), Previous (⌘⇧[). Caveat: `kAXHiddenAttribute`
+tab's. Menu: New Tab, Next, Previous. Caveat: `kAXHiddenAttribute`
 is **application-level** (no per-window hidden attribute), so a tab is
 effectively a set of apps — an app spanning two tabs can't be hidden for only
 one. Distinct apps per tab switch cleanly.
 
-Next milestone (see the flow task brief): global hotkeys (Carbon event taps) so
-split/tab shortcuts fire regardless of the focused app.
+**Milestone 6 (global hotkeys) — done.** `HotKeyManager` registers system-wide
+shortcuts via the Carbon Hot Key API (`RegisterEventHotKey`) — fires regardless
+of focused app, needs no extra permission, and only sees the chords it
+registers. Default prefix is ⌃⌥⌘ (a dedicated modifier so a global ⌘T doesn't
+shadow per-app shortcuts).
+
+**Configurable hotkeys (extension).** `HotKeyConfig` defines a `TilingCommand`
+enum, `KeyBinding` (Carbon keycode + modifier mask), and preset sets
+(Tessera / tmux-inspired / zellij-inspired / custom), persisted to
+`~/Library/Application Support/Tessera/hotkeys.json`. "Hotkey Settings…" opens
+`HotKeyPreferencesController`: a preset picker plus a `KeyRecorderView` per
+command to record custom chords; edits apply live (`HotKeyManager.unregisterAll`
++ re-register) and switch the preset to Custom. The menu shows each command's
+current chord. Note: presets are distinct **chord sets** inspired by those
+tools, not a full modal prefix-key (leader) emulation — that would be a future
+enhancement.
+
+All six brief milestones are complete.
 
 ## Tiling & the macOS z-order reality
 
