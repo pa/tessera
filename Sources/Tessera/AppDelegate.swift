@@ -14,6 +14,7 @@ import TesseraCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let commandPalette = CommandPaletteController()
+    private let navigator = WorkspaceNavigatorController()
     private lazy var tiling = TilingController(palette: commandPalette) { [weak self] in
         let ownPID = ProcessInfo.processInfo.processIdentifier
         // Prefer the true system-wide focused window; fall back to the last
@@ -48,8 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "▚"
         statusItem.button?.toolTip = "Tessera"
+        tiling.onWorkspaceChange = { [weak self] in self?.refreshStatusIndicator() }
+        statusItem.button?.title = tabIndicator()
 
         // Nudge the system Accessibility prompt on first launch. The grant lands
         // asynchronously; the menu reflects the live state each time it opens.
@@ -97,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let palette = NSMenuItem(title: "Command Palette…\(chordSuffix(.palette))", action: #selector(openCommandPalette), keyEquivalent: "")
         palette.target = self
         menu.addItem(palette)
+        let navigatorItem = NSMenuItem(title: "Workspace Navigator…\(chordSuffix(.navigator))", action: #selector(openNavigator), keyEquivalent: "")
+        navigatorItem.target = self
+        menu.addItem(navigatorItem)
 
         let tileHeader = NSMenuItem(title: "Tiling", action: nil, keyEquivalent: "")
         tileHeader.isEnabled = false
@@ -171,6 +176,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func changePaneWindow() { tiling.changeFocusedPaneWindow() }
     @objc private func toggleFullscreen() { tiling.toggleFullscreen() }
     @objc private func toggleFloat() { tiling.toggleFloat() }
+    @objc private func openNavigator() {
+        let roots = tiling.workspaceSnapshot().map { tab -> WorkspaceNavigatorController.Node in
+            let children = tab.panes.map { pane in
+                WorkspaceNavigatorController.Node(
+                    title: (pane.isFocused ? "▸ " : "") + pane.title,
+                    emphasized: pane.isFocused,
+                    children: []
+                ) { [weak self] in
+                    if let paneID = pane.paneID {
+                        self?.tiling.focusPane(tabIndex: tab.index, pane: paneID)
+                    } else if let windowID = pane.floatingWindowID {
+                        self?.tiling.focusFloating(tabIndex: tab.index, windowID: windowID)
+                    }
+                }
+            }
+            return WorkspaceNavigatorController.Node(
+                title: "Tab \(tab.index + 1)" + (tab.isActive ? "  (current)" : ""),
+                emphasized: tab.isActive,
+                children: children
+            ) { [weak self] in self?.tiling.focusTab(tab.index) }
+        }
+        navigator.show(roots: roots)
+    }
     @objc private func newTab() { tiling.newTab() }
     @objc private func nextTab() { tiling.nextTab() }
     @objc private func previousTab() { tiling.previousTab() }
@@ -178,13 +206,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
 
     /// Reflect the active input mode in the menu-bar glyph and the HUD hint bar.
+    /// In normal mode the glyph shows the current tab position (▚ 2/3); a mode
+    /// temporarily overrides it with its own glyph (▚ P/T/R).
     private func applyMode(_ mode: ModeEngine.Mode) {
-        statusItem.button?.title = mode.glyph
+        statusItem.button?.title = (mode == .normal) ? tabIndicator() : mode.glyph
         if let hint = mode.hudText {
             modeHUD.show(hint)
         } else {
             modeHUD.hide()
         }
+    }
+
+    /// Refresh the menu-bar glyph after a tab change (only while in normal mode;
+    /// a mode's own glyph takes precedence).
+    private func refreshStatusIndicator() {
+        if modeEngine.mode == .normal {
+            statusItem.button?.title = tabIndicator()
+        }
+    }
+
+    private func tabIndicator() -> String {
+        let tabs = tiling.tabSummary
+        return "▚ \(tabs.index + 1)/\(tabs.count)"
     }
 
     /// Register every global shortcut from the current binding set. Called at
@@ -227,6 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .previousTab: return { [weak self] in self?.tiling.previousTab() }
         case .reset: return { [weak self] in self?.tiling.reset() }
         case .palette: return { [weak self] in self?.openCommandPalette() }
+        case .navigator: return { [weak self] in self?.openNavigator() }
         // Mode-entry is handled by the event tap, never registered here.
         case .enterPaneMode, .enterTabMode, .enterResizeMode: return {}
         }

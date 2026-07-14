@@ -9,6 +9,7 @@ enum TilingCommand: String, CaseIterable, Codable {
     case newTab, nextTab, previousTab
     case reset
     case palette
+    case navigator
     case enterPaneMode, enterTabMode, enterResizeMode
 
     var title: String {
@@ -28,6 +29,7 @@ enum TilingCommand: String, CaseIterable, Codable {
         case .previousTab: return "Previous Tab"
         case .reset: return "Reset Tiling"
         case .palette: return "Command Palette"
+        case .navigator: return "Workspace Navigator"
         case .enterPaneMode: return "Enter Pane Mode"
         case .enterTabMode: return "Enter Tab Mode"
         case .enterResizeMode: return "Enter Resize Mode"
@@ -45,7 +47,7 @@ enum TilingCommand: String, CaseIterable, Codable {
          .focusLeft, .focusDown, .focusUp, .focusRight,
          .moveLeft, .moveDown, .moveUp, .moveRight,
          .newTab, .nextTab, .previousTab,
-         .palette, .reset]
+         .palette, .navigator, .reset]
     }
 }
 
@@ -95,7 +97,7 @@ struct KeyBindingSet: Codable, Equatable {
         baseKeys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
                    .newTab: kVK_ANSI_T, .nextTab: kVK_ANSI_RightBracket,
                    .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
-                   .palette: kVK_Space].merging(focusKeys) { a, _ in a }
+                   .palette: kVK_Space, .navigator: kVK_ANSI_O].merging(focusKeys) { a, _ in a }
     ))
 
     /// tmux-inspired: ⌃⌥ prefix, tmux's letter mnemonics (c new, n/p next/prev),
@@ -105,7 +107,7 @@ struct KeyBindingSet: Codable, Equatable {
         baseKeys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
                    .newTab: kVK_ANSI_C, .nextTab: kVK_ANSI_N,
                    .previousTab: kVK_ANSI_P, .reset: kVK_ANSI_R,
-                   .palette: kVK_Space].merging(focusKeys) { a, _ in a }
+                   .palette: kVK_Space, .navigator: kVK_ANSI_O].merging(focusKeys) { a, _ in a }
     ))
 
     /// zellij-inspired: ⌥⌘ prefix, hjkl focus, =/- splits, ⇧+hjkl move.
@@ -114,7 +116,7 @@ struct KeyBindingSet: Codable, Equatable {
         baseKeys: [.splitRight: kVK_ANSI_Equal, .splitDown: kVK_ANSI_Minus,
                    .newTab: kVK_ANSI_N, .nextTab: kVK_ANSI_RightBracket,
                    .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
-                   .palette: kVK_Space].merging(focusKeys) { a, _ in a }
+                   .palette: kVK_Space, .navigator: kVK_ANSI_O].merging(focusKeys) { a, _ in a }
     ))
 
     static func preset(_ preset: Preset) -> KeyBindingSet {

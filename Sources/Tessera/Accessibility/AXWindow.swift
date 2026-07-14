@@ -59,6 +59,22 @@ struct AXWindow {
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     }
 
+    var isMinimized: Bool {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXMinimizedAttribute as CFString, &value) == .success
+        else { return false }
+        return (value as? Bool) ?? false
+    }
+
+    /// Minimize/unminimize — the reliable fallback for hiding a window that
+    /// refuses to move off-screen (e.g. browsers clamp their position on-screen).
+    func setMinimized(_ minimized: Bool) {
+        AXUIElementSetAttributeValue(
+            element, kAXMinimizedAttribute as CFString,
+            (minimized ? kCFBooleanTrue : kCFBooleanFalse)
+        )
+    }
+
     /// Move the window so its top-left corner sits at `point`. Returns the AX
     /// error so callers can detect apps that refuse to move.
     @discardableResult
