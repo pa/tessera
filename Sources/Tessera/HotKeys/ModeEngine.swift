@@ -30,7 +30,7 @@ final class ModeEngine {
         var hudText: String? {
             switch self {
             case .normal: return nil
-            case .pane: return "PANE   r → split right    d → split down    hjkl → focus    ⇧hjkl → move    c → change window    ⏎/esc → done"
+            case .pane: return "PANE   r/d → split    hjkl → focus / move float    ⇧hjkl → swap    f → fullscreen    w → float    c → change    ⏎/esc → done"
             case .tab: return "TAB   n → new tab    ] / l → next    [ / h → previous    ⏎/esc → done"
             case .resize: return "RESIZE   h → narrower    l → wider    k → taller    j → shorter    ⏎/esc → done"
             }
@@ -167,10 +167,13 @@ final class ModeEngine {
             case kVK_ANSI_R: exitAndRun { $0.split(.horizontal) }
             case kVK_ANSI_D: exitAndRun { $0.split(.vertical) }
             case kVK_ANSI_C: exitAndRun { $0.changeFocusedPaneWindow() } // opens palette
-            case kVK_ANSI_H: tiling.moveOrFocus(.left, move: shift)
-            case kVK_ANSI_J: tiling.moveOrFocus(.down, move: shift)
-            case kVK_ANSI_K: tiling.moveOrFocus(.up, move: shift)
-            case kVK_ANSI_L: tiling.moveOrFocus(.right, move: shift)
+            case kVK_ANSI_F: tiling.toggleFullscreen()
+            case kVK_ANSI_W: tiling.toggleFloat()
+            // hjkl: moves the window if it's floating, else moves focus (⇧ swaps).
+            case kVK_ANSI_H: tiling.paneDirection(.left, shift: shift)
+            case kVK_ANSI_J: tiling.paneDirection(.down, shift: shift)
+            case kVK_ANSI_K: tiling.paneDirection(.up, shift: shift)
+            case kVK_ANSI_L: tiling.paneDirection(.right, shift: shift)
             default: break // swallowed
             }
         case .tab:

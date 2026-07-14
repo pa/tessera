@@ -109,6 +109,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitDown.target = self
         splitDown.isEnabled = trusted
         menu.addItem(splitDown)
+        let fullscreen = NSMenuItem(title: "Toggle Fullscreen Pane", action: #selector(toggleFullscreen), keyEquivalent: "")
+        fullscreen.target = self
+        fullscreen.isEnabled = trusted
+        menu.addItem(fullscreen)
+        let floatPane = NSMenuItem(title: "Toggle Float Pane", action: #selector(toggleFloat), keyEquivalent: "")
+        floatPane.target = self
+        floatPane.isEnabled = trusted
+        menu.addItem(floatPane)
         let changeWindow = NSMenuItem(title: "Change Pane Window…", action: #selector(changePaneWindow), keyEquivalent: "")
         changeWindow.target = self
         changeWindow.isEnabled = trusted
@@ -161,6 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func splitDown() { tiling.split(.vertical) }
     @objc private func resetTiling() { tiling.reset() }
     @objc private func changePaneWindow() { tiling.changeFocusedPaneWindow() }
+    @objc private func toggleFullscreen() { tiling.toggleFullscreen() }
+    @objc private func toggleFloat() { tiling.toggleFloat() }
     @objc private func newTab() { tiling.newTab() }
     @objc private func nextTab() { tiling.nextTab() }
     @objc private func previousTab() { tiling.previousTab() }

@@ -18,12 +18,20 @@ final class TilingController {
         let window: AXWindow
     }
 
-    /// A virtual tab: an independent BSP workspace. Switching tabs hides one
-    /// tab's apps and unhides the next's (`kAXHiddenAttribute`).
+    /// A window that floats above the tiled layout at an explicit frame, moved
+    /// freely by the user (not part of the BSP tree).
+    private struct FloatingWindow {
+        let pid: pid_t
+        let window: AXWindow
+        var frame: CGRect
+    }
+
+    /// A virtual tab: an independent BSP workspace plus any floating windows.
     private struct Tab {
         var tree = LayoutTree()
         var occupants: [PaneID: WindowRef] = [:]
         var focusedPane = PaneID(0)
+        var floating: [FloatingWindow] = []
     }
 
     private var tabs: [Tab] = [Tab()]
@@ -31,6 +39,9 @@ final class TilingController {
     private var pendingPane: PaneID?
     /// Where to return if the new-tab window picker is cancelled.
     private var newTabReturnIndex: Int?
+    /// When set, this pane's window fills the whole workspace (zoom); the other
+    /// tiled windows are parked off-screen until it's un-zoomed.
+    private var zoomedPane: PaneID?
 
     // The split/fill logic works against "the active tab" through these; making
     // them computed keeps that code unchanged while the state lives per-tab.
@@ -82,8 +93,10 @@ final class TilingController {
     /// (non-tiled) windows off-screen so only the tiled one shows. With no tiles,
     /// reveal everything.
     private func applyWorkspaceVisibility() {
-        let managedPIDs = Set(occupants.values.map(\.pid))
+        let floating = tabs[activeTabIndex].floating
+        let managedPIDs = Set(occupants.values.map(\.pid)).union(floating.map(\.pid))
         let managedWindowIDs = Set(occupants.values.compactMap { $0.window.windowID })
+            .union(floating.compactMap { $0.window.windowID })
 
         for app in AppTargeter.regularApps() {
             let pid = app.processIdentifier
@@ -145,12 +158,16 @@ final class TilingController {
     /// Drop panes whose window was closed; the BSP tree collapses so the
     /// surviving neighbor expands to fill the freed space.
     private func removeClosedWindows() {
-        let dead = occupants.compactMap { pane, ref in ref.window.isAlive ? nil : pane }
-        guard !dead.isEmpty else { return }
-        for pane in dead {
+        let deadPanes = occupants.compactMap { pane, ref in ref.window.isAlive ? nil : pane }
+        let hadDeadFloating = tabs[activeTabIndex].floating.contains { !$0.window.isAlive }
+        guard !deadPanes.isEmpty || hadDeadFloating else { return }
+
+        for pane in deadPanes {
             tree.remove(pane)
             occupants[pane] = nil
+            if zoomedPane == pane { zoomedPane = nil }
         }
+        tabs[activeTabIndex].floating.removeAll { !$0.window.isAlive }
         if occupants[focusedPane] == nil {
             focusedPane = tree.paneIDs.first ?? PaneID(0)
         }
@@ -162,6 +179,12 @@ final class TilingController {
     /// user resized/moved it outside Tessera). Windows already at their frame are
     /// left alone, so this never fights our own layout changes.
     private func enforceLayout() {
+        if let zoomed = zoomedPane, let ref = occupants[zoomed] {
+            if let current = ref.window.frame, !current.approximatelyEqual(to: zoomFrame, tolerance: 8) {
+                ref.window.setFrame(zoomFrame)
+            }
+            return
+        }
         let frames = self.frames()
         for (pane, ref) in occupants {
             guard let expected = frames[pane], let current = ref.window.frame else { continue }
@@ -180,6 +203,7 @@ final class TilingController {
             for (pane, ref) in tab.occupants {
                 if let rect = frames[pane] { ref.window.setFrame(rect) }
             }
+            for floater in tab.floating { floater.window.setFrame(floater.frame) }
         }
         restoreParkedExtras()
         unhideAllApps()
@@ -219,6 +243,116 @@ final class TilingController {
         palette.onSelect = { [weak self] item in self?.fill(newPane, with: item) }
         palette.onCancel = { [weak self] in self?.cancelPending() }
         palette.present(anchorRectAX: paneRect, excludingWindowIDs: occupiedWindowIDs())
+    }
+
+    /// Zoom the focused pane to fill the whole workspace (other tiled windows
+    /// park off-screen), or un-zoom back to the tiled layout. Toggles.
+    func toggleFullscreen() {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        guard occupants[focusedPane] != nil else { return }
+        zoomedPane = (zoomedPane == focusedPane) ? nil : focusedPane
+        relayout()
+        if let ref = occupants[focusedPane] { focus(ref) }
+    }
+
+    /// The whole workspace minus the outer gap — the frame a zoomed pane fills.
+    private var zoomFrame: CGRect {
+        workspaceRect.insetBy(dx: config.outerGap, dy: config.outerGap)
+    }
+
+    // MARK: - Floating windows
+
+    /// Toggle the focused window between floating and tiled. A tiled window
+    /// leaves the BSP tree and floats (centered); a floating window is re-tiled
+    /// into the layout.
+    func toggleFloat() {
+        guard pendingPane == nil else { return }
+
+        if let index = focusedFloatingIndex() {
+            // Floating → tiled: pull it back into the BSP layout.
+            let floater = tabs[activeTabIndex].floating.remove(at: index)
+            addToLayout(WindowRef(pid: floater.pid, window: floater.window))
+            relayout()
+            applyWorkspaceVisibility()
+            if let ref = occupants[focusedPane] { focus(ref) }
+            return
+        }
+
+        // Tiled → floating: remove from the tree, float it centered.
+        syncFocusFromLiveWindow()
+        guard let ref = occupants[focusedPane] else { return }
+        let pane = focusedPane
+        tree.remove(pane)
+        occupants[pane] = nil
+        if zoomedPane == pane { zoomedPane = nil }
+        if occupants[focusedPane] == nil { focusedPane = tree.paneIDs.first ?? PaneID(0) }
+
+        let rect = centeredFloatRect()
+        ref.window.setFrame(rect)
+        ref.window.raise()
+        tabs[activeTabIndex].floating.append(FloatingWindow(pid: ref.pid, window: ref.window, frame: rect))
+        relayout()
+        applyWorkspaceVisibility()
+    }
+
+    /// Move the focused floating window by a step in a direction.
+    func moveFloating(_ direction: PaneNavigation.Direction, by step: CGFloat = 40) {
+        guard let index = focusedFloatingIndex() else { return }
+        var floater = tabs[activeTabIndex].floating[index]
+        switch direction {
+        case .left: floater.frame.origin.x -= step
+        case .right: floater.frame.origin.x += step
+        case .up: floater.frame.origin.y -= step
+        case .down: floater.frame.origin.y += step
+        }
+        tabs[activeTabIndex].floating[index] = floater
+        floater.window.setPosition(floater.frame.origin)
+        floater.window.raise()
+    }
+
+    /// In pane mode, h/j/k/l moves the focused *floating* window; otherwise it
+    /// moves focus (or, with shift, swaps the tiled window).
+    func paneDirection(_ direction: PaneNavigation.Direction, shift: Bool) {
+        if focusedFloatingIndex() != nil {
+            moveFloating(direction)
+        } else {
+            moveOrFocus(direction, move: shift)
+        }
+    }
+
+    /// Index of the floating window that currently has focus, if any.
+    private func focusedFloatingIndex() -> Int? {
+        guard let focused = focusedWindowProvider(), let windowID = focused.window.windowID else { return nil }
+        return tabs[activeTabIndex].floating.firstIndex { $0.window.windowID == windowID }
+    }
+
+    /// Add a window to the tiled layout — as the first pane if empty, else by
+    /// splitting the focused pane.
+    private func addToLayout(_ ref: WindowRef) {
+        if occupants.isEmpty {
+            occupants[PaneID(0)] = ref
+            focusedPane = PaneID(0)
+        } else if let newPane = tree.split(focusedPane, orientation: .horizontal) {
+            occupants[newPane] = ref
+            focusedPane = newPane
+        }
+    }
+
+    private func centeredFloatRect() -> CGRect {
+        let w = workspaceRect
+        let size = CGSize(width: w.width * 0.5, height: w.height * 0.6)
+        return CGRect(x: w.midX - size.width / 2, y: w.midY - size.height / 2,
+                      width: size.width, height: size.height)
+    }
+
+    /// Raise the active tab's floating windows and restore them to their frames
+    /// (used after a tab becomes active — they were parked off-screen).
+    private func restoreFloating() {
+        for floater in tabs[activeTabIndex].floating {
+            floater.window.setFrame(floater.frame)
+            floater.window.raise()
+        }
     }
 
     /// Re-pick the window occupying the focused pane (e.g. you chose the wrong
@@ -315,11 +449,13 @@ final class TilingController {
             for (pane, ref) in tab.occupants {
                 if let rect = frames[pane] { ref.window.setFrame(rect) }
             }
+            for floater in tab.floating { floater.window.setFrame(floater.frame) }
         }
         tabs = [Tab()]
         activeTabIndex = 0
         pendingPane = nil
         newTabReturnIndex = nil
+        zoomedPane = nil
         overlay.hide()
         restoreParkedExtras()
         unhideAllApps() // no tiles left → reveal everything
@@ -335,7 +471,8 @@ final class TilingController {
     func newTab() {
         guard pendingPane == nil else { return }
         let previousIndex = activeTabIndex
-        hide(tabs[activeTabIndex])
+        hideTab(at: activeTabIndex)
+        zoomedPane = nil
         tabs.append(Tab())
         activeTabIndex = tabs.count - 1
 
@@ -373,9 +510,11 @@ final class TilingController {
     /// target tab's (relayout snaps them back), and focus its active pane.
     func switchTo(_ index: Int) {
         guard pendingPane == nil, index != activeTabIndex, tabs.indices.contains(index) else { return }
-        hide(tabs[activeTabIndex])
+        hideTab(at: activeTabIndex)
+        zoomedPane = nil // zoom is per-tab; don't carry it across
         activeTabIndex = index
         relayout() // moves the incoming tab's windows from off-screen back to their panes
+        restoreFloating()
         if let ref = occupants[focusedPane] { focus(ref) }
         applyWorkspaceVisibility()
     }
@@ -389,9 +528,18 @@ final class TilingController {
         return CGPoint(x: bounds.minX, y: bounds.maxY + bounds.height)
     }
 
-    private func hide(_ tab: Tab) {
-        for ref in tab.occupants.values {
+    /// Park a tab's windows (tiled and floating) off-screen. Captures each
+    /// floating window's current frame first, so a manual move survives a
+    /// round-trip through another tab.
+    private func hideTab(at index: Int) {
+        for ref in tabs[index].occupants.values {
             ref.window.setPosition(offscreenPoint)
+        }
+        for i in tabs[index].floating.indices {
+            if let current = tabs[index].floating[i].window.frame {
+                tabs[index].floating[i].frame = current
+            }
+            tabs[index].floating[i].window.setPosition(offscreenPoint)
         }
     }
 
@@ -447,12 +595,25 @@ final class TilingController {
         occupants.first { $0.value.window.windowID == windowID }?.key
     }
 
-    /// Snap every occupied pane's window to its computed frame.
+    /// Snap every occupied pane's window to its computed frame — or, when a pane
+    /// is zoomed, fill the workspace with it and park the rest off-screen.
     private func relayout() {
+        if let zoomed = zoomedPane, occupants[zoomed] != nil {
+            for (pane, ref) in occupants {
+                if pane == zoomed { ref.window.setFrame(zoomFrame) }
+                else { ref.window.setPosition(offscreenPoint) }
+            }
+            return
+        }
         let frames = self.frames()
         for (pane, ref) in occupants {
             guard let rect = frames[pane] else { continue }
             ref.window.setFrame(rect)
+        }
+        // Keep floating windows above the tiled set (position left untouched —
+        // they move freely).
+        for floater in tabs[activeTabIndex].floating {
+            floater.window.raise()
         }
     }
 

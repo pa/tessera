@@ -145,11 +145,18 @@ All six brief milestones are complete.
   Tessera and removes panes whose window was closed (BSP collapse → neighbor
   fills).
 - **Change Pane Window** — re-pick the focused pane's window via the palette.
+- **Full-screen (zoom)** — the focused pane fills the workspace; others park
+  off-screen. Toggles; auto-clears on tab switch / reset / window close.
+- **Floating panes** — toggle a window out of the BSP tree to float above the
+  tiles (centered), move it freely with hjkl in Pane mode, and re-tile it.
+  Floating windows are exempt from layout enforcement; they park/restore with
+  their tab.
 - New Tab pops the palette for its first window; tab hide/show is per-window
   off-screen parking (see "z-order reality" caveat — still bounded by apps that
   clamp window position on-screen).
 
-Roadmap: full-screen (zoom) a pane; free-moving floating panes.
+Pane mode keys: r/d split, hjkl focus (or move a floating window), ⇧hjkl swap,
+f fullscreen, w float, c change window. Tab mode: n/]/[. Resize mode: hjkl.
 
 ## Tiling & the macOS z-order reality
 
