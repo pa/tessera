@@ -126,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         changeWindow.target = self
         changeWindow.isEnabled = trusted
         menu.addItem(changeWindow)
+        let stacked = NSMenuItem(title: "Toggle Stacked Layout", action: #selector(toggleStacked), keyEquivalent: "")
+        stacked.target = self
+        stacked.isEnabled = trusted
+        menu.addItem(stacked)
         let balance = NSMenuItem(title: "Balance Sizes", action: #selector(balanceSizes), keyEquivalent: "")
         balance.target = self
         balance.isEnabled = trusted
@@ -227,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleLastTab() { tiling.toggleLastTab() }
     @objc private func balanceSizes() { tiling.balanceSizes() }
     @objc private func soloPane() { tiling.soloFocusedPane() }
+    @objc private func toggleStacked() { tiling.toggleStacked() }
 
     @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
 

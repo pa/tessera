@@ -27,11 +27,14 @@ final class TilingController {
     }
 
     /// A virtual tab: an independent BSP workspace plus any floating windows.
+    /// When `stacked`, the tiled windows are shown one-at-a-time filling the
+    /// workspace (a monocle/accordion layout) instead of BSP-tiled.
     private struct Tab {
         var tree = LayoutTree()
         var occupants: [PaneID: WindowRef] = [:]
         var focusedPane = PaneID(0)
         var floating: [FloatingWindow] = []
+        var stacked = false
     }
 
     private var tabs: [Tab] = [Tab()]
@@ -185,6 +188,10 @@ final class TilingController {
     /// user resized/moved it outside Tessera). Windows already at their frame are
     /// left alone, so this never fights our own layout changes.
     private func enforceLayout() {
+        // Stacked windows all target the same full-screen rect; re-snapping every
+        // tick fights apps that clamp their size (flicker). Positioning happens
+        // on toggle/cycle instead.
+        if tabs[activeTabIndex].stacked { return }
         if let zoomed = zoomedPane, let ref = occupants[zoomed] {
             if let current = ref.window.frame, !current.approximatelyEqual(to: zoomFrame, tolerance: 8) {
                 ref.window.setFrame(zoomFrame)
@@ -448,6 +455,17 @@ final class TilingController {
     /// just move focus.
     func moveOrFocus(_ direction: PaneNavigation.Direction, move: Bool) {
         if move { moveWindow(direction) } else { moveFocus(direction) }
+    }
+
+    /// Toggle the active tab between BSP tiling and stacked (monocle) layout,
+    /// where all tiled windows fill the workspace and only the focused one shows.
+    func toggleStacked() {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        tabs[activeTabIndex].stacked.toggle()
+        zoomedPane = nil
+        relayout()
+        if let ref = occupants[focusedPane] { focus(ref) }
     }
 
     /// Equalize all pane sizes in the focused tab (AeroSpace "balance-sizes").
@@ -805,6 +823,12 @@ final class TilingController {
     /// Snap every occupied pane's window to its computed frame — or, when a pane
     /// is zoomed, fill the workspace with it and park the rest off-screen.
     private func relayout() {
+        if tabs[activeTabIndex].stacked {
+            for (_, ref) in occupants { ref.window.setFrame(zoomFrame) }
+            if let ref = occupants[focusedPane] { ref.window.raise() }
+            for floater in tabs[activeTabIndex].floating { floater.window.raise() }
+            return
+        }
         if let zoomed = zoomedPane, occupants[zoomed] != nil {
             for (pane, ref) in occupants {
                 if pane == zoomed { unpark(ref.window, to: zoomFrame) }
