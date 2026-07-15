@@ -151,6 +151,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         solo.target = self
         solo.isEnabled = trusted
         menu.addItem(solo)
+        let autoTile = NSMenuItem(title: "Auto-tile New Windows", action: #selector(toggleAutoTile), keyEquivalent: "")
+        autoTile.target = self
+        autoTile.isEnabled = trusted
+        autoTile.state = tiling.autoTileEnabled ? .on : .off
+        menu.addItem(autoTile)
         let resetTiling = NSMenuItem(title: "Reset Tiling\(chordSuffix(.reset))", action: #selector(resetTiling), keyEquivalent: "")
         resetTiling.target = self
         menu.addItem(resetTiling)
@@ -247,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func balanceSizes() { tiling.balanceSizes() }
     @objc private func soloPane() { tiling.soloFocusedPane() }
     @objc private func toggleStacked() { tiling.toggleStacked() }
+    @objc private func toggleAutoTile() { tiling.setAutoTile(!tiling.autoTileEnabled) }
 
     @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
 

@@ -15,11 +15,13 @@ final class ModeHUD {
 
         panel.layoutIfNeeded()
         let fitting = label?.intrinsicContentSize.width ?? 400
-        let width = min(max(fitting + 48, 320), 1100)
         let height: CGFloat = 44
 
         if let screen = NSScreen.main {
             let visible = screen.visibleFrame
+            // Fit the text, but never wider than the screen (minus a margin).
+            let maxWidth = max(320, visible.width - 40)
+            let width = min(max(fitting + 40, 320), maxWidth)
             let origin = NSPoint(x: visible.midX - width / 2, y: visible.minY + 60)
             panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
         }
@@ -53,9 +55,12 @@ final class ModeHUD {
 
         let label = NSTextField(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+        label.font = .monospacedSystemFont(ofSize: 11.5, weight: .medium)
         label.textColor = .labelColor
         label.alignment = .center
+        label.maximumNumberOfLines = 1
+        label.lineBreakMode = .byClipping
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
         effect.addSubview(label)
         NSLayoutConstraint.activate([
             label.centerXAnchor.constraint(equalTo: effect.centerXAnchor),

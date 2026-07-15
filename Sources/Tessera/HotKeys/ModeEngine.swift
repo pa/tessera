@@ -30,9 +30,9 @@ final class ModeEngine {
         var hudText: String? {
             switch self {
             case .normal: return nil
-            case .pane: return "PANE   r/d → split    hjkl → focus/move    ⇧hjkl → swap    n/p → cycle    f → fullscreen    s → stack    w → float    b → balance    c → change    ⏎/esc → done"
-            case .tab: return "TAB   n → new    ]/l → next    [/h → prev    ⇧]/⇧[ → move window to tab    ⏎/esc → done"
-            case .resize: return "RESIZE   h → narrower    l → wider    k → taller    j → shorter    ⏎/esc → done"
+            case .pane: return "PANE   r/d split · hjkl focus/move · ⇧hjkl swap · n/p cycle · f full · s stack · w float · b balance · c change · ⏎/esc done"
+            case .tab: return "TAB   n new · ]/l next · [/h prev · ⇧]/⇧[ move window to tab · ⏎/esc done"
+            case .resize: return "RESIZE   h narrower · l wider · k taller · j shorter · ⏎/esc done"
             }
         }
     }

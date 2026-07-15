@@ -59,6 +59,26 @@ struct AXWindow {
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     }
 
+    private func stringAttribute(_ attribute: String) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success
+        else { return nil }
+        return value as? String
+    }
+
+    /// Whether auto-tiling should manage this window: a real window (role
+    /// `AXWindow`) that isn't a dialog, sheet, or floating utility panel. Kept
+    /// lenient — a freshly-launched app's window may not report the
+    /// `AXStandardWindow` subrole yet, and some apps never set a subrole.
+    var isTileable: Bool {
+        let nonTileable: Set<String> = ["AXDialog", "AXSystemDialog", "AXSheet",
+                                        "AXFloatingWindow", "AXSystemFloatingWindow"]
+        if let subrole = stringAttribute(kAXSubroleAttribute), nonTileable.contains(subrole) {
+            return false
+        }
+        return stringAttribute(kAXRoleAttribute) == (kAXWindowRole as String)
+    }
+
     var isMinimized: Bool {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXMinimizedAttribute as CFString, &value) == .success

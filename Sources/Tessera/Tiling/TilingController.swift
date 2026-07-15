@@ -84,6 +84,11 @@ final class TilingController {
     /// Periodically re-snaps drifted windows and drops closed ones.
     private var enforcementTimer: Timer?
 
+    /// When true, new standard windows are auto-added to the active tab.
+    private(set) var autoTileEnabled = false
+    /// Standard window ids seen so far, so auto-tile only grabs *new* windows.
+    private var knownWindowIDs: Set<CGWindowID> = []
+
     /// Non-tiled windows of managed apps that we've parked off-screen (so only
     /// the tiled window of a multi-window app shows), keyed by CGWindowID with
     /// their original frame for restoration on reset/quit.
@@ -161,14 +166,94 @@ final class TilingController {
     private func maintainLayout() {
         guard pendingPane == nil else { return } // don't disturb a split-in-progress
         removeClosedWindows()
+        if autoTileEnabled { autoTileNewWindows() }
+        floatOversizedWindows()
         enforceLayout()
+    }
+
+    /// A window that refuses to shrink to its pane (min-size apps) spills over its
+    /// neighbors. Pop such windows out to floating so the pane collapses and the
+    /// remaining tiles reclaim the space.
+    private func floatOversizedWindows() {
+        guard !tabs[activeTabIndex].stacked, zoomedPane == nil else { return }
+        let frames = self.frames()
+        let oversized = occupants.compactMap { pane, ref -> (PaneID, WindowRef, CGRect)? in
+            guard let rect = frames[pane], let actual = ref.window.frame else { return nil }
+            let overflows = actual.width > rect.width + 24 || actual.height > rect.height + 24
+            return overflows ? (pane, ref, actual) : nil
+        }
+        guard !oversized.isEmpty else { return }
+
+        for (pane, ref, actual) in oversized {
+            tree.remove(pane)
+            occupants[pane] = nil
+            if focusedPane == pane { focusedPane = tree.paneIDs.first ?? PaneID(0) }
+            tabs[activeTabIndex].floating.append(FloatingWindow(pid: ref.pid, window: ref.window, frame: actual))
+        }
+        relayout()
+        applyWorkspaceVisibility()
+    }
+
+    /// Turn window auto-tiling on/off. Enabling seeds the "known" set with every
+    /// current standard window, so only windows opened *after* this get grabbed.
+    func setAutoTile(_ enabled: Bool) {
+        autoTileEnabled = enabled
+        if enabled { knownWindowIDs = allStandardWindowIDs() }
+    }
+
+    private func allStandardWindowIDs() -> Set<CGWindowID> {
+        var ids = Set<CGWindowID>()
+        for app in AppTargeter.regularApps() {
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            for window in AppTargeter.windows(of: appElement) where window.isTileable {
+                if let id = window.windowID { ids.insert(id) }
+            }
+        }
+        return ids
+    }
+
+    /// Adopt any newly-opened standard window into the active tab (splitting the
+    /// focused pane). Window-based, so different windows of one app can live in
+    /// different tabs.
+    private func autoTileNewWindows() {
+        let managed = occupiedWindowIDs()
+        var current = Set<CGWindowID>()
+        var addedAny = false
+
+        for app in AppTargeter.regularApps() {
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            for window in AppTargeter.windows(of: appElement) where window.isTileable {
+                guard let id = window.windowID else { continue }
+                current.insert(id)
+                if !knownWindowIDs.contains(id) && !managed.contains(id) {
+                    addToLayout(WindowRef(pid: app.processIdentifier, window: window))
+                    addedAny = true
+                }
+            }
+        }
+        knownWindowIDs = current
+
+        if addedAny {
+            relayout()
+            if let ref = occupants[focusedPane] { focus(ref) }
+            applyWorkspaceVisibility()
+            onWorkspaceChange?()
+        }
     }
 
     /// Drop panes whose window was closed; the BSP tree collapses so the
     /// surviving neighbor expands to fill the freed space.
+    /// A window is dead if its owning app quit (process gone) or the window
+    /// itself was closed (AX element invalid). Checking the app catches ⌘Q,
+    /// where the element returns `cannotComplete` rather than `invalidUIElement`.
+    private func windowIsDead(_ ref: WindowRef) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: ref.pid), !app.isTerminated else { return true }
+        return !ref.window.isAlive
+    }
+
     private func removeClosedWindows() {
-        let deadPanes = occupants.compactMap { pane, ref in ref.window.isAlive ? nil : pane }
-        let hadDeadFloating = tabs[activeTabIndex].floating.contains { !$0.window.isAlive }
+        let deadPanes = occupants.compactMap { pane, ref in windowIsDead(ref) ? pane : nil }
+        let hadDeadFloating = tabs[activeTabIndex].floating.contains { windowIsDead(WindowRef(pid: $0.pid, window: $0.window)) }
         guard !deadPanes.isEmpty || hadDeadFloating else { return }
 
         for pane in deadPanes {
@@ -176,7 +261,7 @@ final class TilingController {
             occupants[pane] = nil
             if zoomedPane == pane { zoomedPane = nil }
         }
-        tabs[activeTabIndex].floating.removeAll { !$0.window.isAlive }
+        tabs[activeTabIndex].floating.removeAll { windowIsDead(WindowRef(pid: $0.pid, window: $0.window)) }
         if occupants[focusedPane] == nil {
             focusedPane = tree.paneIDs.first ?? PaneID(0)
         }
@@ -483,13 +568,29 @@ final class TilingController {
 
     private func cycleFocus(_ delta: Int) {
         guard pendingPane == nil else { return }
-        syncFocusFromLiveWindow()
-        let ordered = tree.paneIDs.filter { occupants[$0] != nil }
-        guard !ordered.isEmpty else { return }
-        let index = ordered.firstIndex(of: focusedPane) ?? 0
-        let next = ordered[(index + delta + ordered.count) % ordered.count]
-        focusedPane = next
-        if let ref = occupants[next] { focus(ref) }
+        // Every managed window in the active tab, tiled then floating.
+        var ids: [CGWindowID] = []
+        for pane in tree.paneIDs {
+            if let ref = occupants[pane], let id = ref.window.windowID { ids.append(id) }
+        }
+        for floater in tabs[activeTabIndex].floating {
+            if let id = floater.window.windowID { ids.append(id) }
+        }
+        guard !ids.isEmpty else { return }
+        let currentID = focusedWindowProvider()?.window.windowID
+        let index = currentID.flatMap { ids.firstIndex(of: $0) } ?? 0
+        focusWindow(id: ids[(index + delta + ids.count) % ids.count])
+    }
+
+    /// Focus a managed window (tiled or floating) by its CGWindowID.
+    private func focusWindow(id: CGWindowID) {
+        if let match = occupants.first(where: { $0.value.window.windowID == id }) {
+            focusedPane = match.key
+            focus(match.value)
+        } else if let floater = tabs[activeTabIndex].floating.first(where: { $0.window.windowID == id }) {
+            floater.window.raise()
+            NSRunningApplication(processIdentifier: floater.pid)?.activate()
+        }
     }
 
     /// Keep only the focused pane's window tiled; untile the rest (they become
