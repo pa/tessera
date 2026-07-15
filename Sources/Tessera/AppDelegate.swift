@@ -147,6 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         prevTab.target = self
         prevTab.isEnabled = trusted && tabs.count > 1
         menu.addItem(prevTab)
+        let moveToNext = NSMenuItem(title: "Move Window → Next Tab", action: #selector(moveWindowToNextTab), keyEquivalent: "")
+        moveToNext.target = self
+        moveToNext.isEnabled = trusted && tabs.count > 1
+        menu.addItem(moveToNext)
+        let moveToPrev = NSMenuItem(title: "Move Window → Previous Tab", action: #selector(moveWindowToPrevTab), keyEquivalent: "")
+        moveToPrev.target = self
+        moveToPrev.isEnabled = trusted && tabs.count > 1
+        menu.addItem(moveToPrev)
 
         menu.addItem(.separator())
         let hotkeySettings = NSMenuItem(title: "Hotkey Settings…", action: #selector(openHotKeyPreferences), keyEquivalent: "")
@@ -202,6 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func newTab() { tiling.newTab() }
     @objc private func nextTab() { tiling.nextTab() }
     @objc private func previousTab() { tiling.previousTab() }
+    @objc private func moveWindowToNextTab() { tiling.moveFocusedToNextTab() }
+    @objc private func moveWindowToPrevTab() { tiling.moveFocusedToPreviousTab() }
 
     @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
 

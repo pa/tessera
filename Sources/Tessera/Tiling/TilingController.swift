@@ -244,7 +244,9 @@ final class TilingController {
         guard let paneRect = frames()[newPane] else { return }
         overlay.show(inAXRect: paneRect)
 
-        palette.onSelect = { [weak self] item in self?.fill(newPane, with: item) }
+        palette.onSelect = { [weak self] item in
+            if self?.fill(newPane, with: item) == false { self?.cancelPending() }
+        }
         palette.onCancel = { [weak self] in self?.cancelPending() }
         palette.present(anchorRectAX: paneRect, excludingWindowIDs: occupiedWindowIDs())
     }
@@ -425,7 +427,14 @@ final class TilingController {
         guard occupants[pane] != nil, let rect = frames()[pane] else { return }
         pendingPane = pane
         overlay.show(inAXRect: rect)
-        palette.onSelect = { [weak self] item in self?.fill(pane, with: item) }
+        palette.onSelect = { [weak self] item in
+            // On failure keep the existing window (don't remove the pane).
+            if self?.fill(pane, with: item) == false {
+                self?.pendingPane = nil
+                self?.overlay.hide()
+                NSSound.beep()
+            }
+        }
         palette.onCancel = { [weak self] in
             self?.pendingPane = nil
             self?.overlay.hide()
@@ -496,6 +505,9 @@ final class TilingController {
             for ref in tab.occupants.values {
                 if let id = ref.window.windowID { ids.insert(id) }
             }
+            for floater in tab.floating {
+                if let id = floater.window.windowID { ids.insert(id) }
+            }
         }
         return ids
     }
@@ -544,7 +556,9 @@ final class TilingController {
         newTabReturnIndex = previousIndex
         guard let paneRect = frames()[firstPane] else { return }
         overlay.show(inAXRect: paneRect)
-        palette.onSelect = { [weak self] item in self?.fill(firstPane, with: item) }
+        palette.onSelect = { [weak self] item in
+            if self?.fill(firstPane, with: item) == false { self?.cancelNewTab() }
+        }
         palette.onCancel = { [weak self] in self?.cancelNewTab() }
         palette.present(anchorRectAX: paneRect, excludingWindowIDs: occupiedWindowIDs())
     }
@@ -569,6 +583,58 @@ final class TilingController {
 
     func nextTab() { switchTo((activeTabIndex + 1) % tabs.count) }
     func previousTab() { switchTo((activeTabIndex - 1 + tabs.count) % tabs.count) }
+
+    func moveFocusedToNextTab() { moveFocusedToTab((activeTabIndex + 1) % tabs.count) }
+    func moveFocusedToPreviousTab() { moveFocusedToTab((activeTabIndex - 1 + tabs.count) % tabs.count) }
+
+    /// Move the focused window (tiled or floating) out of the current tab and
+    /// into `targetIndex`. The current tab reflows; we stay put so the window
+    /// "sends" to the other tab.
+    func moveFocusedToTab(_ targetIndex: Int) {
+        guard pendingPane == nil, targetIndex != activeTabIndex, tabs.indices.contains(targetIndex) else { return }
+        syncFocusFromLiveWindow()
+
+        // Floating window → keep it floating in the target tab.
+        if let floatIndex = focusedFloatingIndex() {
+            var floater = tabs[activeTabIndex].floating.remove(at: floatIndex)
+            if let current = floater.window.frame { floater.frame = current }
+            tabs[targetIndex].floating.append(floater)
+            park(floater.window)
+            relayout()
+            applyWorkspaceVisibility()
+            onWorkspaceChange?()
+            return
+        }
+
+        // Tiled window → remove from this tab's tree, add to the target's.
+        guard let ref = occupants[focusedPane] else { return }
+        let pane = focusedPane
+        tree.remove(pane)
+        occupants[pane] = nil
+        if zoomedPane == pane { zoomedPane = nil }
+        if occupants[focusedPane] == nil { focusedPane = tree.paneIDs.first ?? PaneID(0) }
+
+        addToTab(targetIndex, ref: ref)
+        relayout()
+        park(ref.window) // target tab is inactive → stash off-screen
+        applyWorkspaceVisibility()
+        onWorkspaceChange?()
+    }
+
+    /// Add a window to another tab's tiled layout (first pane if empty, else a
+    /// split of that tab's focused pane).
+    private func addToTab(_ index: Int, ref: WindowRef) {
+        if tabs[index].occupants.isEmpty {
+            tabs[index].occupants[PaneID(0)] = ref
+            tabs[index].focusedPane = PaneID(0)
+        } else {
+            let target = tabs[index].focusedPane
+            if let newPane = tabs[index].tree.split(target, orientation: .horizontal) {
+                tabs[index].occupants[newPane] = ref
+                tabs[index].focusedPane = newPane
+            }
+        }
+    }
 
     /// Switch to `index`: stash the current tab's windows off-screen, reveal the
     /// target tab's (relayout snaps them back), and focus its active pane.
@@ -634,20 +700,22 @@ final class TilingController {
 
     // MARK: - Palette outcomes
 
-    private func fill(_ pane: PaneID, with item: PaletteItem) {
+    /// Place the resolved window into `pane`. Returns false if no window could be
+    /// resolved (e.g. every window of the picked app is already tiled) — the
+    /// caller decides how to clean up (roll back a split vs. keep an existing
+    /// pane).
+    @discardableResult
+    private func fill(_ pane: PaneID, with item: PaletteItem) -> Bool {
+        guard let ref = resolve(item) else { return false }
         overlay.hide()
         pendingPane = nil
         newTabReturnIndex = nil
-
-        guard let ref = resolve(item) else {
-            cancelPending() // couldn't resolve a window — undo the split
-            return
-        }
         occupants[pane] = ref
         focusedPane = pane
         relayout()
         focus(ref)
         applyWorkspaceVisibility()
+        return true
     }
 
     /// Bring the tiled set forward as a group, then activate the focused pane's
@@ -706,18 +774,29 @@ final class TilingController {
         }
     }
 
-    /// Turn a palette selection into a concrete, tracked window — launching the
-    /// app first if the item is an application rather than an open window.
+    /// Turn a palette selection into a concrete, tracked window — never one
+    /// that's already tiled/floating in any tab (so the same window can't land
+    /// in two panes). Launches the app if the item is an application.
     private func resolve(_ item: PaletteItem) -> WindowRef? {
+        let occupied = occupiedWindowIDs()
         switch item.kind {
         case .window(let windowID):
-            guard let pid = item.pid,
+            // Already-tiled windows are filtered from the palette, but guard here
+            // too in case the list was stale.
+            guard let pid = item.pid, !occupied.contains(windowID),
                   let window = AppTargeter.window(pid: pid, windowID: windowID) else { return nil }
             return WindowRef(pid: pid, window: window)
         case .application:
+            // Pick the app's first window that isn't already occupied — picking
+            // the app shouldn't re-home a window that's tiled elsewhere.
             guard let bundleID = item.bundleID,
-                  let window = try? AppTargeter.mainWindow(bundleID: bundleID, launchIfNeeded: true),
+                  let appElement = try? AppTargeter.applicationElement(bundleID: bundleID, launchIfNeeded: true),
                   let pid = AppTargeter.runningApp(bundleID: bundleID)?.processIdentifier else { return nil }
+            let free = AppTargeter.windows(of: appElement).first { window in
+                guard let id = window.windowID else { return false }
+                return !occupied.contains(id)
+            }
+            guard let window = free else { return nil } // no un-tiled window available
             return WindowRef(pid: pid, window: window)
         }
     }

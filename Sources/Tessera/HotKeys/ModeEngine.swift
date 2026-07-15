@@ -31,7 +31,7 @@ final class ModeEngine {
             switch self {
             case .normal: return nil
             case .pane: return "PANE   r/d → split    hjkl → focus / move float    ⇧hjkl → swap    f → fullscreen    w → float    c → change    ⏎/esc → done"
-            case .tab: return "TAB   n → new tab    ] / l → next    [ / h → previous    ⏎/esc → done"
+            case .tab: return "TAB   n → new    ]/l → next    [/h → prev    ⇧]/⇧[ → move window to tab    ⏎/esc → done"
             case .resize: return "RESIZE   h → narrower    l → wider    k → taller    j → shorter    ⏎/esc → done"
             }
         }
@@ -179,8 +179,11 @@ final class ModeEngine {
         case .tab:
             switch keyCode {
             case kVK_ANSI_N: exitAndRun { $0.newTab() } // opens the palette → leave the mode
-            case kVK_ANSI_RightBracket, kVK_ANSI_L: tiling.nextTab()
-            case kVK_ANSI_LeftBracket, kVK_ANSI_H: tiling.previousTab()
+            // ⇧ moves the focused window to the next/previous tab; bare switches.
+            case kVK_ANSI_RightBracket, kVK_ANSI_L:
+                if shift { tiling.moveFocusedToNextTab() } else { tiling.nextTab() }
+            case kVK_ANSI_LeftBracket, kVK_ANSI_H:
+                if shift { tiling.moveFocusedToPreviousTab() } else { tiling.previousTab() }
             default: break // swallowed
             }
         case .resize:
