@@ -126,6 +126,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         changeWindow.target = self
         changeWindow.isEnabled = trusted
         menu.addItem(changeWindow)
+        let balance = NSMenuItem(title: "Balance Sizes", action: #selector(balanceSizes), keyEquivalent: "")
+        balance.target = self
+        balance.isEnabled = trusted
+        menu.addItem(balance)
+        let solo = NSMenuItem(title: "Keep Only Focused Pane", action: #selector(soloPane), keyEquivalent: "")
+        solo.target = self
+        solo.isEnabled = trusted
+        menu.addItem(solo)
         let resetTiling = NSMenuItem(title: "Reset Tiling\(chordSuffix(.reset))", action: #selector(resetTiling), keyEquivalent: "")
         resetTiling.target = self
         menu.addItem(resetTiling)
@@ -155,6 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         moveToPrev.target = self
         moveToPrev.isEnabled = trusted && tabs.count > 1
         menu.addItem(moveToPrev)
+        let lastTab = NSMenuItem(title: "Toggle Last Tab", action: #selector(toggleLastTab), keyEquivalent: "")
+        lastTab.target = self
+        lastTab.isEnabled = trusted && tabs.count > 1
+        menu.addItem(lastTab)
 
         menu.addItem(.separator())
         let hotkeySettings = NSMenuItem(title: "Hotkey Settings…", action: #selector(openHotKeyPreferences), keyEquivalent: "")
@@ -212,6 +224,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func previousTab() { tiling.previousTab() }
     @objc private func moveWindowToNextTab() { tiling.moveFocusedToNextTab() }
     @objc private func moveWindowToPrevTab() { tiling.moveFocusedToPreviousTab() }
+    @objc private func toggleLastTab() { tiling.toggleLastTab() }
+    @objc private func balanceSizes() { tiling.balanceSizes() }
+    @objc private func soloPane() { tiling.soloFocusedPane() }
 
     @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
 

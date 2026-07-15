@@ -39,6 +39,8 @@ final class TilingController {
     private var pendingPane: PaneID?
     /// Where to return if the new-tab window picker is cancelled.
     private var newTabReturnIndex: Int?
+    /// The tab that was active before the current one (for back-and-forth).
+    private var lastTabIndex: Int?
     /// When set, this pane's window fills the whole workspace (zoom); the other
     /// tiled windows are parked off-screen until it's un-zoomed.
     private var zoomedPane: PaneID?
@@ -448,6 +450,53 @@ final class TilingController {
         if move { moveWindow(direction) } else { moveFocus(direction) }
     }
 
+    /// Equalize all pane sizes in the focused tab (AeroSpace "balance-sizes").
+    func balanceSizes() {
+        guard pendingPane == nil else { return }
+        var tab = tabs[activeTabIndex]
+        tab.tree.balance()
+        tabs[activeTabIndex] = tab
+        relayout()
+    }
+
+    /// Cycle focus to the next/previous window in tree order (AeroSpace DFS focus).
+    func focusNextWindow() { cycleFocus(1) }
+    func focusPreviousWindow() { cycleFocus(-1) }
+
+    private func cycleFocus(_ delta: Int) {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        let ordered = tree.paneIDs.filter { occupants[$0] != nil }
+        guard !ordered.isEmpty else { return }
+        let index = ordered.firstIndex(of: focusedPane) ?? 0
+        let next = ordered[(index + delta + ordered.count) % ordered.count]
+        focusedPane = next
+        if let ref = occupants[next] { focus(ref) }
+    }
+
+    /// Keep only the focused pane's window tiled; untile the rest (they become
+    /// unmanaged and get hidden). A non-destructive "close-all-but-current".
+    func soloFocusedPane() {
+        guard pendingPane == nil else { return }
+        syncFocusFromLiveWindow()
+        guard let ref = occupants[focusedPane] else { return }
+        var tab = tabs[activeTabIndex]
+        tab.tree = LayoutTree()
+        tab.occupants = [PaneID(0): ref]
+        tab.focusedPane = PaneID(0)
+        tabs[activeTabIndex] = tab
+        zoomedPane = nil
+        relayout()
+        focus(ref)
+        applyWorkspaceVisibility()
+    }
+
+    /// Toggle to the previously-active tab (AeroSpace workspace-back-and-forth).
+    func toggleLastTab() {
+        guard let last = lastTabIndex, tabs.indices.contains(last), last != activeTabIndex else { return }
+        switchTo(last)
+    }
+
     /// Grow or shrink the focused pane's width/height and re-snap the affected
     /// windows. Works regardless of which side of its split the pane is on.
     func resizeFocused(axis: SplitOrientation, grow: Bool, by delta: CGFloat = 0.05) {
@@ -641,6 +690,7 @@ final class TilingController {
     func switchTo(_ index: Int) {
         guard pendingPane == nil, index != activeTabIndex, tabs.indices.contains(index) else { return }
         recordFloatingFrames(at: activeTabIndex)
+        lastTabIndex = activeTabIndex // remember for back-and-forth
         zoomedPane = nil // zoom is per-tab; don't carry it across
         activeTabIndex = index
         // Hide the outgoing tab's apps (kAXHidden, no animation) and reveal the

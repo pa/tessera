@@ -183,6 +183,30 @@ public indirect enum BSPNode: Sendable {
         return false
     }
 
+    /// Number of leaf panes under this node.
+    var leafCount: Int {
+        switch self {
+        case .leaf: return 1
+        case .split(_, _, let a, let b): return a.leafCount + b.leafCount
+        }
+    }
+
+    /// Rebalance so every leaf pane ends up the same size: each split's ratio is
+    /// set to the fraction of leaves in its first subtree (so a split feeding a
+    /// 2-leaf subtree and a 1-leaf subtree gets ratio 2/3). Equivalent to
+    /// AeroSpace's "balance-sizes".
+    public func balanced() -> BSPNode {
+        switch self {
+        case .leaf:
+            return self
+        case .split(let orientation, _, let a, let b):
+            let ratio = CGFloat(a.leafCount) / CGFloat(a.leafCount + b.leafCount)
+            return .split(orientation: orientation,
+                          ratio: ratio.clamped(to: BSPNode.ratioBounds),
+                          first: a.balanced(), second: b.balanced())
+        }
+    }
+
     /// Grow or shrink the pane `target` along an axis by `delta` (a ratio
     /// fraction), adjusting the nearest ancestor split of that orientation —
     /// whichever side the pane sits on. Unlike a directional resize, this always
@@ -335,6 +359,11 @@ public struct LayoutTree: Sendable {
     /// Grow/shrink `target`'s width (`.horizontal`) or height (`.vertical`).
     public mutating func resize(_ target: PaneID, axis: SplitOrientation, grow: Bool, by delta: CGFloat) {
         root = root.resized(target, axis: axis, grow: grow, by: delta)
+    }
+
+    /// Equalize all pane sizes.
+    public mutating func balance() {
+        root = root.balanced()
     }
 
     public func frames(in rect: CGRect, config: LayoutConfig = .tight) -> [PaneID: CGRect] {

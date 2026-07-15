@@ -30,7 +30,7 @@ final class ModeEngine {
         var hudText: String? {
             switch self {
             case .normal: return nil
-            case .pane: return "PANE   r/d → split    hjkl → focus / move float    ⇧hjkl → swap    f → fullscreen    w → float    c → change    ⏎/esc → done"
+            case .pane: return "PANE   r/d → split    hjkl → focus/move    ⇧hjkl → swap    n/p → cycle    f → fullscreen    w → float    b → balance    c → change    ⏎/esc → done"
             case .tab: return "TAB   n → new    ]/l → next    [/h → prev    ⇧]/⇧[ → move window to tab    ⏎/esc → done"
             case .resize: return "RESIZE   h → narrower    l → wider    k → taller    j → shorter    ⏎/esc → done"
             }
@@ -169,6 +169,9 @@ final class ModeEngine {
             case kVK_ANSI_C: exitAndRun { $0.changeFocusedPaneWindow() } // opens palette
             case kVK_ANSI_F: tiling.toggleFullscreen()
             case kVK_ANSI_W: tiling.toggleFloat()
+            case kVK_ANSI_B: tiling.balanceSizes()
+            case kVK_ANSI_N: tiling.focusNextWindow()
+            case kVK_ANSI_P: tiling.focusPreviousWindow()
             // hjkl: moves the window if it's floating, else moves focus (⇧ swaps).
             case kVK_ANSI_H: tiling.paneDirection(.left, shift: shift)
             case kVK_ANSI_J: tiling.paneDirection(.down, shift: shift)
