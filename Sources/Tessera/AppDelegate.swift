@@ -66,6 +66,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.delegate = self
         populate(menu)
         statusItem.menu = menu
+
+        // On startup, if Accessibility is already granted, prompt for the first
+        // window so tab 1 isn't empty. (First-ever launch isn't trusted yet — the
+        // "Pick First Window…" menu item covers that once granted.)
+        if AccessibilityAuthorizer.isTrusted {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.tiling.promptFirstWindow()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -102,6 +111,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let navigatorItem = NSMenuItem(title: "Workspace Navigator…\(chordSuffix(.navigator))", action: #selector(openNavigator), keyEquivalent: "")
         navigatorItem.target = self
         menu.addItem(navigatorItem)
+        let firstWindow = NSMenuItem(title: "Pick First Window…", action: #selector(pickFirstWindow), keyEquivalent: "")
+        firstWindow.target = self
+        firstWindow.isEnabled = trusted
+        menu.addItem(firstWindow)
 
         let tileHeader = NSMenuItem(title: "Tiling", action: nil, keyEquivalent: "")
         tileHeader.isEnabled = false
@@ -200,6 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func changePaneWindow() { tiling.changeFocusedPaneWindow() }
     @objc private func toggleFullscreen() { tiling.toggleFullscreen() }
     @objc private func toggleFloat() { tiling.toggleFloat() }
+    @objc private func pickFirstWindow() { tiling.promptFirstWindow() }
+
     @objc private func openNavigator() {
         let roots = tiling.workspaceSnapshot().map { tab -> WorkspaceNavigatorController.Node in
             let children = tab.panes.map { pane in

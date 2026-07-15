@@ -579,6 +579,30 @@ final class TilingController {
         return ids
     }
 
+    /// If the active tab has no windows, pop the palette to pick the one that
+    /// fills it — used on startup and to begin a fresh session. No-op if the tab
+    /// already has content or a pick is already in progress.
+    func promptFirstWindow() {
+        guard pendingPane == nil,
+              occupants.isEmpty,
+              tabs[activeTabIndex].floating.isEmpty else { return }
+        let firstPane = PaneID(0)
+        pendingPane = firstPane
+        guard let rect = frames()[firstPane] else { pendingPane = nil; return }
+        overlay.show(inAXRect: rect)
+        palette.onSelect = { [weak self] item in
+            if self?.fill(firstPane, with: item) == false {
+                self?.pendingPane = nil
+                self?.overlay.hide()
+            }
+        }
+        palette.onCancel = { [weak self] in
+            self?.pendingPane = nil
+            self?.overlay.hide()
+        }
+        palette.present(anchorRectAX: rect, excludingWindowIDs: occupiedWindowIDs())
+    }
+
     /// Tear down the tiling session: bring every tab's windows back on-screen
     /// (some are parked off-screen while their tab is inactive) and collapse to a
     /// single empty tab.
