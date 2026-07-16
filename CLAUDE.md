@@ -199,7 +199,8 @@ All six brief milestones are complete.
   clamp window position on-screen).
 
 Pane mode keys: r/d split, hjkl focus (or move a floating window), ⇧hjkl swap,
-f fullscreen, w float, c change window. Tab mode: n/]/[. Resize mode: hjkl.
+f fullscreen, w float, c change window. Tab mode: n new, h/l prev/next,
+⇧h/⇧l move window to tab. Resize mode: hjkl.
 
 ## Tiling & the macOS z-order reality
 

@@ -31,7 +31,7 @@ final class ModeEngine {
             switch self {
             case .normal: return nil
             case .pane: return "PANE   r/d split · hjkl focus/move · ⇧hjkl swap · n/p cycle · f full · s stack · w float · b balance · c change · ⏎/esc done"
-            case .tab: return "TAB   n new · ]/l next · [/h prev · ⇧]/⇧[ move window to tab · ⏎/esc done"
+            case .tab: return "TAB   n new · h/l prev/next · ⇧h/⇧l move window to tab · ⏎/esc done"
             case .resize: return "RESIZE   h narrower · l wider · k taller · j shorter · ⏎/esc done"
             }
         }
@@ -183,10 +183,11 @@ final class ModeEngine {
         case .tab:
             switch keyCode {
             case kVK_ANSI_N: exitAndRun { $0.newTab() } // opens the palette → leave the mode
-            // ⇧ moves the focused window to the next/previous tab; bare switches.
-            case kVK_ANSI_RightBracket, kVK_ANSI_L:
+            // hjkl, consistent with Pane/Resize modes: h/l switch tabs; as in Pane
+            // mode (⇧hjkl moves a window), ⇧h/⇧l move the focused window to that tab.
+            case kVK_ANSI_L:
                 if shift { tiling.moveFocusedToNextTab() } else { tiling.nextTab() }
-            case kVK_ANSI_LeftBracket, kVK_ANSI_H:
+            case kVK_ANSI_H:
                 if shift { tiling.moveFocusedToPreviousTab() } else { tiling.previousTab() }
             default: break // swallowed
             }
