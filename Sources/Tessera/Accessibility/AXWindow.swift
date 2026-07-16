@@ -66,17 +66,26 @@ struct AXWindow {
         return value as? String
     }
 
-    /// Whether auto-tiling should manage this window: a real window (role
-    /// `AXWindow`) that isn't a dialog, sheet, or floating utility panel. Kept
-    /// lenient — a freshly-launched app's window may not report the
-    /// `AXStandardWindow` subrole yet, and some apps never set a subrole.
+    /// Whether auto-tiling should manage this window. Must be a real top-level
+    /// **standard** window — not a dialog, sheet, popover, bubble, or utility
+    /// panel. Browsers (Brave/Chrome) spawn lots of transient `AXWindow`s for
+    /// autofill/menus/extension popups; those report a non-standard subrole
+    /// (often `AXUnknown`), so we require `AXStandardWindow` rather than accepting
+    /// any `AXWindow`.
     var isTileable: Bool {
-        let nonTileable: Set<String> = ["AXDialog", "AXSystemDialog", "AXSheet",
-                                        "AXFloatingWindow", "AXSystemFloatingWindow"]
-        if let subrole = stringAttribute(kAXSubroleAttribute), nonTileable.contains(subrole) {
-            return false
+        guard stringAttribute(kAXRoleAttribute) == (kAXWindowRole as String) else { return false }
+        if let subrole = stringAttribute(kAXSubroleAttribute) {
+            return subrole == (kAXStandardWindowSubrole as String)
         }
-        return stringAttribute(kAXRoleAttribute) == (kAXWindowRole as String)
+        // No subrole reported (rare — a few apps never set one). Fall back to a
+        // real window's tell: title-bar controls. Popovers/bubbles have none.
+        return hasAttribute(kAXCloseButtonAttribute)
+    }
+
+    /// True if the element exposes (can read) the given attribute.
+    private func hasAttribute(_ attribute: String) -> Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success
     }
 
     /// True when the window is in macOS **native fullscreen** (it has moved to

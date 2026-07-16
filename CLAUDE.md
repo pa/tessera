@@ -203,7 +203,16 @@ All six brief milestones are complete.
   third-party switcher switches to the tab that holds it (via
   `didActivateApplicationNotification` → `revealTab`), instead of letting macOS
   un-hide it on top of the current tab. Guarded on the app being the real
-  frontmost, so a switch's own hide-others churn doesn't thrash tabs.
+  frontmost, so a switch's own hide-others churn doesn't thrash tabs. Also
+  suppressed when the app already has a window in the *current* tab: a same-app
+  activation there is ambiguous (e.g. exiting a browser's video fullscreen
+  briefly reports a sibling window as focused), so it must not jump to a
+  same-app window in another tab.
+- **Standard-window-only tiling** — `AXWindow.isTileable` requires role
+  `AXWindow` **and** subrole `AXStandardWindow` (or, if no subrole, a title-bar
+  close button). Browsers spawn many transient `AXWindow`s for autofill/menus/
+  extension popups (reporting `AXUnknown` etc.); requiring a standard window
+  keeps those popovers from being adopted and yanked into panes.
 - **Change Pane Window** — re-pick the focused pane's window via the palette.
 - **Full-screen (zoom)** — the focused pane fills the workspace; others park
   off-screen. Toggles; auto-clears on tab switch / reset / window close. Distinct

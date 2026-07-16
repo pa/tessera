@@ -520,10 +520,25 @@ final class TilingController {
             if case .pane(let pane) = location.kind { focusedPane = pane }
             return
         }
+        // The app's reported focused window is unreliable during transitions
+        // (notably exiting a browser's video fullscreen, where a private window's
+        // focus briefly resolves to a *sibling* normal window). If this app
+        // already has a window in the current tab, the user is already looking at
+        // it here — don't jump to a same-app window in another tab on what may be
+        // a spurious activation. Cross-tab follow still works for apps with no
+        // window in the current tab (the common Cmd-Tab case).
+        if appHasWindowInActiveTab(pid) { return }
         switch location.kind {
         case .pane(let pane): focusPane(tabIndex: location.tab, pane: pane)
         case .floating: focusFloating(tabIndex: location.tab, windowID: windowID)
         }
+    }
+
+    /// Whether the app `pid` owns any window (tiled or floating) in the active tab.
+    private func appHasWindowInActiveTab(_ pid: pid_t) -> Bool {
+        let tab = tabs[activeTabIndex]
+        return tab.occupants.values.contains { $0.pid == pid }
+            || tab.floating.contains { $0.pid == pid }
     }
 
     /// Switch to `tabIndex` if needed and raise a specific floating window.
