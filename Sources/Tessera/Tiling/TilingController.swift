@@ -84,10 +84,14 @@ final class TilingController {
     /// Periodically re-snaps drifted windows and drops closed ones.
     private var enforcementTimer: Timer?
 
-    /// When true, new standard windows are auto-added to the active tab.
-    private(set) var autoTileEnabled = false
+    /// New standard windows are always auto-added to the active tab.
+    private let autoTileEnabled = true
     /// Standard window ids seen so far, so auto-tile only grabs *new* windows.
     private var knownWindowIDs: Set<CGWindowID> = []
+    /// When each window was placed, so auto-float gives freshly-tiled windows a
+    /// grace period to settle into their pane before deciding they can't fit.
+    private var placedAt: [CGWindowID: Date] = [:]
+    private let floatGrace: TimeInterval = 2.0
 
     /// Non-tiled windows of managed apps that we've parked off-screen (so only
     /// the tiled window of a multi-window app shows), keyed by CGWindowID with
@@ -157,6 +161,9 @@ final class TilingController {
 
     /// Start the timer that drops closed windows and re-snaps drifted ones.
     func startEnforcing() {
+        // Seed the known-window set so existing windows aren't grabbed all at
+        // once; only windows opened after startup auto-tile.
+        knownWindowIDs = allStandardWindowIDs()
         enforcementTimer?.invalidate()
         enforcementTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.maintainLayout() }
@@ -177,8 +184,13 @@ final class TilingController {
     private func floatOversizedWindows() {
         guard !tabs[activeTabIndex].stacked, zoomedPane == nil else { return }
         let frames = self.frames()
+        let now = Date()
         let oversized = occupants.compactMap { pane, ref -> (PaneID, WindowRef, CGRect)? in
             guard let rect = frames[pane], let actual = ref.window.frame else { return nil }
+            // Skip windows still within their settle grace period.
+            if let id = ref.window.windowID, let placed = placedAt[id], now.timeIntervalSince(placed) < floatGrace {
+                return nil
+            }
             let overflows = actual.width > rect.width + 24 || actual.height > rect.height + 24
             return overflows ? (pane, ref, actual) : nil
         }
@@ -194,11 +206,19 @@ final class TilingController {
         applyWorkspaceVisibility()
     }
 
-    /// Turn window auto-tiling on/off. Enabling seeds the "known" set with every
-    /// current standard window, so only windows opened *after* this get grabbed.
-    func setAutoTile(_ enabled: Bool) {
-        autoTileEnabled = enabled
-        if enabled { knownWindowIDs = allStandardWindowIDs() }
+    /// Adopt a just-created window into the active tab, if auto-tiling is on and
+    /// the window is a new, tileable, unmanaged one. Driven by `WindowObserver`
+    /// (`kAXWindowCreated`) so it happens the instant the window appears.
+    func handleWindowCreated(pid: pid_t, window: AXWindow) {
+        guard autoTileEnabled, pendingPane == nil,
+              window.isTileable, let id = window.windowID,
+              !knownWindowIDs.contains(id), !occupiedWindowIDs().contains(id) else { return }
+        knownWindowIDs.insert(id)
+        addToLayout(WindowRef(pid: pid, window: window))
+        relayout()
+        if let ref = occupants[focusedPane] { focus(ref) }
+        applyWorkspaceVisibility()
+        onWorkspaceChange?()
     }
 
     private func allStandardWindowIDs() -> Set<CGWindowID> {
@@ -498,6 +518,7 @@ final class TilingController {
             occupants[newPane] = ref
             focusedPane = newPane
         }
+        if let id = ref.window.windowID { placedAt[id] = Date() }
     }
 
     /// Split along the focused pane's longer axis, so an auto-placed window snaps

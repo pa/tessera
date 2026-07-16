@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastActiveAppPID: pid_t?
 
     private let hotKeys = HotKeyManager()
+    private let windowObserver = WindowObserver()
     private let modeHUD = ModeHUD()
     private lazy var modeEngine: ModeEngine = {
         let engine = ModeEngine(tiling: tiling)
@@ -61,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyBindings(bindingSet)
         modeEngine.start()
         tiling.startEnforcing()
+        windowObserver.onWindowCreated = { [weak self] pid, window in
+            self?.tiling.handleWindowCreated(pid: pid, window: window)
+        }
+        windowObserver.start()
 
         let menu = NSMenu()
         menu.delegate = self
@@ -151,11 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         solo.target = self
         solo.isEnabled = trusted
         menu.addItem(solo)
-        let autoTile = NSMenuItem(title: "Auto-tile New Windows", action: #selector(toggleAutoTile), keyEquivalent: "")
-        autoTile.target = self
-        autoTile.isEnabled = trusted
-        autoTile.state = tiling.autoTileEnabled ? .on : .off
-        menu.addItem(autoTile)
         let resetTiling = NSMenuItem(title: "Reset Tiling\(chordSuffix(.reset))", action: #selector(resetTiling), keyEquivalent: "")
         resetTiling.target = self
         menu.addItem(resetTiling)
@@ -252,7 +252,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func balanceSizes() { tiling.balanceSizes() }
     @objc private func soloPane() { tiling.soloFocusedPane() }
     @objc private func toggleStacked() { tiling.toggleStacked() }
-    @objc private func toggleAutoTile() { tiling.setAutoTile(!tiling.autoTileEnabled) }
 
     @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
 
