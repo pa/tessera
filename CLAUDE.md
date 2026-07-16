@@ -24,7 +24,7 @@ source build isn't downloaded, it's compiled locally, so nothing is quarantined
 — the same trick paneru uses).
 
 ```sh
-brew tap facetscloud/tessera https://github.com/facetscloud/tessera
+brew tap pa/tessera https://github.com/pa/tessera
 brew install tessera
 brew services start tessera        # run now + at login
 ```

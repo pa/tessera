@@ -1,7 +1,7 @@
 # Homebrew formula for Tessera.
 #
 # Install via a tap:
-#   brew tap facetscloud/tessera https://github.com/facetscloud/tessera
+#   brew tap pa/tessera https://github.com/pa/tessera
 #   brew install tessera
 #
 # Or straight from this file in a checkout:
@@ -14,12 +14,12 @@
 # Accessibility grant survives `brew upgrade` — no Apple Developer ID needed.
 class Tessera < Formula
   desc "Menu-bar tiling window manager that puppets GUI apps via Accessibility"
-  homepage "https://github.com/facetscloud/tessera"
+  homepage "https://github.com/pa/tessera"
   license "MIT"
-  head "https://github.com/facetscloud/tessera.git", branch: "main"
+  head "https://github.com/pa/tessera.git", branch: "main"
 
   # For tagged releases, point at the source tarball and its checksum:
-  #   url "https://github.com/facetscloud/tessera/archive/refs/tags/v0.1.0.tar.gz"
+  #   url "https://github.com/pa/tessera/archive/refs/tags/v0.1.0.tar.gz"
   #   sha256 "..."
   #   version "0.1.0"
 
