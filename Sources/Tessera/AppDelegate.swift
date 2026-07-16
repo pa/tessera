@@ -72,17 +72,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         populate(menu)
         statusItem.menu = menu
 
-        // On startup, if Accessibility is already granted, prompt for the first
-        // window so tab 1 isn't empty. (First-ever launch isn't trusted yet — the
-        // "Pick First Window…" menu item covers that once granted.)
+        // On startup (once Accessibility is granted): restore the saved session
+        // if any windows match; otherwise prompt for the first window.
         if AccessibilityAuthorizer.isTrusted {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.tiling.promptFirstWindow()
+                guard let self else { return }
+                let restored = SessionStore.load().map { self.tiling.restoreSession($0) } ?? false
+                if !restored { self.tiling.promptFirstWindow() }
+                self.startSessionAutosave()
             }
         }
     }
 
+    private var sessionSaveTimer: Timer?
+    private func startSessionAutosave() {
+        sessionSaveTimer?.invalidate()
+        sessionSaveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self.map { SessionStore.save($0.tiling.captureSession()) } }
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        SessionStore.save(tiling.captureSession()) // persist layout for next launch
         // Restore any hidden apps and re-snap windows before exiting.
         tiling.teardown()
     }

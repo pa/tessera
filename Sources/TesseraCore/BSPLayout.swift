@@ -5,7 +5,7 @@ import CoreGraphics
 /// Stable identifier for a leaf pane. Callers (or `LayoutTree`) assign these;
 /// the layout math never invents them, which keeps frame computation pure and
 /// tests deterministic.
-public struct PaneID: Hashable, Sendable, CustomStringConvertible {
+public struct PaneID: Hashable, Sendable, Codable, CustomStringConvertible {
     public let value: Int
     public init(_ value: Int) { self.value = value }
     public var description: String { "pane#\(value)" }
@@ -21,7 +21,7 @@ public struct PaneID: Hashable, Sendable, CustomStringConvertible {
 ///
 /// `first` is the left/top child; `second` is the right/bottom child. `ratio`
 /// is the fraction of the divisible extent given to `first`.
-public enum SplitOrientation: Sendable {
+public enum SplitOrientation: Sendable, Codable {
     case horizontal
     case vertical
 
@@ -94,7 +94,7 @@ public struct LayoutConfig: Equatable, Sendable {
 /// A Binary Space Partitioning tree: every node is either a leaf pane or a
 /// split of two children. Pure value type — all mutations return a new tree, so
 /// it's trivially testable and free of the window server's state.
-public indirect enum BSPNode: Sendable {
+public indirect enum BSPNode: Sendable, Codable {
     case leaf(PaneID)
     case split(orientation: SplitOrientation, ratio: CGFloat, first: BSPNode, second: BSPNode)
 
@@ -313,7 +313,7 @@ public indirect enum BSPNode: Sendable {
 /// A workspace's live BSP tree plus a monotonic id allocator. Wraps `BSPNode`
 /// so callers can split/remove without hand-managing pane ids. Starts as a
 /// single pane (`PaneID(0)`) filling the workspace.
-public struct LayoutTree: Sendable {
+public struct LayoutTree: Sendable, Codable {
     public private(set) var root: BSPNode
     private var nextValue: Int
 

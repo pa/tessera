@@ -747,6 +747,96 @@ final class TilingController {
         return ids
     }
 
+    // MARK: - Session persistence
+
+    /// Snapshot the whole workspace (tabs → tree + windows by identity) for
+    /// saving to disk.
+    func captureSession() -> SavedSession {
+        let savedTabs = tabs.map { tab -> SavedTab in
+            var occ: [Int: SavedWindow] = [:]
+            for (pane, ref) in tab.occupants {
+                occ[pane.value] = savedWindow(pid: ref.pid, window: ref.window)
+            }
+            let floats = tab.floating.map {
+                SavedFloating(window: savedWindow(pid: $0.pid, window: $0.window), frame: $0.frame)
+            }
+            return SavedTab(tree: tab.tree, occupants: occ, floating: floats, stacked: tab.stacked)
+        }
+        return SavedSession(version: SessionStore.currentVersion, activeTabIndex: activeTabIndex, tabs: savedTabs)
+    }
+
+    private func savedWindow(pid: pid_t, window: AXWindow) -> SavedWindow {
+        SavedWindow(bundleID: NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? "",
+                    title: window.title ?? "",
+                    windowID: window.windowID)
+    }
+
+    /// Rebuild the workspace from a saved session, matching *currently-open*
+    /// windows into their saved slots (by window-id, then bundle+title, then
+    /// bundle). Panes/tabs with no matching window are dropped. Returns false if
+    /// nothing matched (caller falls back to the first-window prompt).
+    @discardableResult
+    func restoreSession(_ session: SavedSession) -> Bool {
+        // Index of currently-open tileable windows.
+        var available: [(bundleID: String, title: String, windowID: CGWindowID?, pid: pid_t, window: AXWindow)] = []
+        for app in AppTargeter.regularApps() {
+            let bundle = app.bundleIdentifier ?? ""
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            for window in AppTargeter.windows(of: appElement) where window.isTileable {
+                available.append((bundle, window.title ?? "", window.windowID, app.processIdentifier, window))
+            }
+        }
+        var used = Set<CGWindowID>()
+        func isFree(_ id: CGWindowID?) -> Bool { id.map { !used.contains($0) } ?? true }
+        func match(_ saved: SavedWindow) -> (pid_t, AXWindow)? {
+            if let wid = saved.windowID, let hit = available.first(where: { $0.windowID == wid && isFree(wid) }) {
+                return (hit.pid, hit.window)
+            }
+            if let hit = available.first(where: { $0.bundleID == saved.bundleID && $0.title == saved.title && isFree($0.windowID) }) {
+                return (hit.pid, hit.window)
+            }
+            if let hit = available.first(where: { $0.bundleID == saved.bundleID && isFree($0.windowID) }) {
+                return (hit.pid, hit.window)
+            }
+            return nil
+        }
+
+        var newTabs: [Tab] = []
+        for savedTab in session.tabs {
+            var tab = Tab()
+            tab.tree = savedTab.tree
+            tab.stacked = savedTab.stacked
+            for (paneValue, savedWin) in savedTab.occupants {
+                if let (pid, window) = match(savedWin) {
+                    tab.occupants[PaneID(paneValue)] = WindowRef(pid: pid, window: window)
+                    if let id = window.windowID { used.insert(id) }
+                }
+            }
+            // Collapse panes whose window didn't come back.
+            for pane in tab.tree.paneIDs where tab.occupants[pane] == nil {
+                tab.tree.remove(pane)
+            }
+            tab.focusedPane = tab.tree.paneIDs.first { tab.occupants[$0] != nil } ?? (tab.tree.paneIDs.first ?? PaneID(0))
+            for savedFloat in savedTab.floating {
+                if let (pid, window) = match(savedFloat.window) {
+                    tab.floating.append(FloatingWindow(pid: pid, window: window, frame: savedFloat.frame))
+                    if let id = window.windowID { used.insert(id) }
+                }
+            }
+            if !tab.occupants.isEmpty || !tab.floating.isEmpty { newTabs.append(tab) }
+        }
+        guard !newTabs.isEmpty else { return false }
+
+        tabs = newTabs
+        activeTabIndex = min(max(0, session.activeTabIndex), tabs.count - 1)
+        knownWindowIDs = allStandardWindowIDs() // don't re-auto-tile restored windows
+        relayout()
+        if let ref = occupants[focusedPane] { focus(ref) }
+        applyWorkspaceVisibility()
+        onWorkspaceChange?()
+        return true
+    }
+
     /// If the active tab has no windows, pop the palette to pick the one that
     /// fills it — used on startup and to begin a fresh session. No-op if the tab
     /// already has content or a pick is already in progress.
