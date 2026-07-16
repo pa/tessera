@@ -207,9 +207,10 @@ final class TilingController {
         let now = Date()
         let oversized = occupants.compactMap { pane, ref -> (PaneID, WindowRef, CGRect)? in
             guard let rect = frames[pane], let actual = ref.window.frame else { return nil }
-            // A native-fullscreen window fills the display (it's in its own Space);
-            // that's not "oversized for its pane" — leave it and its pane alone.
-            if ref.window.isFullscreen { return nil }
+            // A fullscreen window (native, or a browser's HTML5 video fullscreen)
+            // fills the display; that's not "oversized for its pane" — leave it and
+            // its pane alone, or we'd float it out and shift focus to a neighbor.
+            if isFullscreenLike(ref.window, frame: actual) { return nil }
             // Skip windows still within their settle grace period.
             if let id = ref.window.windowID, let placed = placedAt[id], now.timeIntervalSince(placed) < floatGrace {
                 return nil
@@ -343,9 +344,9 @@ final class TilingController {
         var snapped = false
         for (pane, ref) in occupants {
             guard let expected = frames[pane], let current = ref.window.frame else { continue }
-            // Don't fight a native-fullscreen window back into its pane — it's in
-            // its own Space. It re-snaps naturally on the first tick after it exits.
-            if ref.window.isFullscreen { continue }
+            // Don't fight a fullscreen window (native or HTML5 video) back into its
+            // pane. It re-snaps naturally on the first tick after it exits.
+            if isFullscreenLike(ref.window, frame: current) { continue }
             if !current.approximatelyEqual(to: expected, tolerance: 8) {
                 ref.window.setFrame(expected)
                 snapped = true
@@ -1189,6 +1190,19 @@ final class TilingController {
     }
 
     // MARK: - Internals
+
+    /// True when a window is (or is acting) full-screen and must be left alone by
+    /// layout enforcement/float-out. Covers both native fullscreen (its own
+    /// Space, `AXFullScreen`) and browser **HTML5 video fullscreen**, which
+    /// resizes the window to the whole display *without* setting `AXFullScreen`.
+    /// A normally-tiled window never covers the full display — even a lone pane
+    /// is inset below the menu bar — so this won't misfire on tiled windows.
+    private func isFullscreenLike(_ window: AXWindow, frame: CGRect?) -> Bool {
+        if window.isFullscreen { return true }
+        guard let frame else { return false }
+        let d = ScreenLayout.mainDisplayBounds
+        return frame.width >= d.width * 0.98 && frame.height >= d.height * 0.98
+    }
 
     private func frames() -> [PaneID: CGRect] {
         tree.frames(in: workspaceRect, config: config)

@@ -227,15 +227,14 @@ Planned, in priority order:
    next display. Today everything assumes `CGMainDisplayID()` /
    `ScreenLayout.mainDisplayBounds`; this generalizes the layout + enforcement to
    each `CGDisplay`.
-3. **Focus-follows-mouse / mouse-follows-focus** — optional, config-gated pointer
-   ergonomics (a `CGEventTap` on mouse-moved → focus the pane under the pointer,
-   and the reverse on focus change).
-4. **Config file + live reload** — a single user config (hotkeys + options like
-   the mouse toggles and gaps) that hot-reloads on change (a `DispatchSource`
-   file watcher), superseding the current hotkeys-only JSON.
+3. **Config file + live reload** — a single user config (hotkeys + options like
+   gaps/padding) that hot-reloads on change (a `DispatchSource` file watcher),
+   superseding the current hotkeys-only JSON.
 
 Considered and **declined** (with rationale, so they aren't re-litigated):
 
+- **Focus-follows-mouse / mouse-follows-focus** — you click to focus anyway, so
+  pointer-driven focus adds little; not worth the always-on mouse event tap.
 - **Sliding animations / sliver peek** — animating AX frame writes burns CPU
   every frame for no functional gain and fights the adaptive-idle-CPU goal.
 - **App-specific window rules** — AeroSpace's app-based model; Tessera is
