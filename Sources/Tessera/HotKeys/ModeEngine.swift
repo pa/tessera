@@ -193,8 +193,11 @@ final class ModeEngine {
             }
         case .resize:
             switch keyCode {
-            case kVK_ANSI_H: tiling.resizeFocused(axis: .horizontal, grow: false) // narrower
-            case kVK_ANSI_L: tiling.resizeFocused(axis: .horizontal, grow: true)  // wider
+            // Width axis is inverted on real windows relative to the pure engine
+            // (the vertical axis is not), so h/l use the opposite `grow` of k/j to
+            // make the on-screen result match the labels: h narrower, l wider.
+            case kVK_ANSI_H: tiling.resizeFocused(axis: .horizontal, grow: true)  // narrower
+            case kVK_ANSI_L: tiling.resizeFocused(axis: .horizontal, grow: false) // wider
             case kVK_ANSI_K: tiling.resizeFocused(axis: .vertical, grow: true)    // taller
             case kVK_ANSI_J: tiling.resizeFocused(axis: .vertical, grow: false)   // shorter
             default: break // swallowed
