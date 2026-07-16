@@ -215,6 +215,45 @@ Pane mode keys: r/d split, hjkl focus (or move a floating window), ⇧hjkl swap,
 f fullscreen, w float, c change window. Tab mode: n new, h/l prev/next,
 ⇧h/⇧l move window to tab. Resize mode: hjkl.
 
+## Roadmap (paneru-inspired, planned)
+
+Planned, in priority order:
+
+1. **IPC / CLI control** — a Unix socket with a unified command grammar so every
+   action is scriptable: `send-cmd <command>`, `query state --json`,
+   `subscribe --json` (line-delimited event stream). Highest leverage — makes
+   Tessera scriptable and integrable (Raycast, status bars, editor plugins).
+2. **Multi-monitor** — per-display layouts plus move-window / move-focus to the
+   next display. Today everything assumes `CGMainDisplayID()` /
+   `ScreenLayout.mainDisplayBounds`; this generalizes the layout + enforcement to
+   each `CGDisplay`.
+3. **Focus-follows-mouse / mouse-follows-focus** — optional, config-gated pointer
+   ergonomics (a `CGEventTap` on mouse-moved → focus the pane under the pointer,
+   and the reverse on focus change).
+4. **Config file + live reload** — a single user config (hotkeys + options like
+   the mouse toggles and gaps) that hot-reloads on change (a `DispatchSource`
+   file watcher), superseding the current hotkeys-only JSON.
+
+Considered and **declined** (with rationale, so they aren't re-litigated):
+
+- **Sliding animations / sliver peek** — animating AX frame writes burns CPU
+  every frame for no functional gain and fights the adaptive-idle-CPU goal.
+- **App-specific window rules** — AeroSpace's app-based model; Tessera is
+  deliberately *window*-based (one app's windows can live in different tabs).
+- **Infinite horizontal strip** — a different tiling philosophy; layout-compute
+  cost is negligible either way (the real cost is AX calls), so it's a workflow
+  choice, not a perf one. Tessera is BSP + virtual tabs (the tmux/zellij
+  concept), which already covers "too many windows" via tabs rather than
+  horizontal scroll.
+- **Native macOS Spaces integration** — Tessera uses its own `kAXHidden` virtual
+  tabs instead of real Spaces (which have no public reordering/switch API).
+
+Possible later follow-up (not scheduled):
+
+- **Native app-tab groups** (NSWindow tabbing, e.g. Ghostty) — treat a native
+  tab group as a single tile so its stacked windows don't fight for one pane.
+  Only matters for apps that use native window tabs.
+
 ## Tiling & the macOS z-order reality
 
 Window z-order on macOS is **per-application** — only one app is frontmost, so
