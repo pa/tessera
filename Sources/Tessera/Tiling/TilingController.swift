@@ -252,19 +252,24 @@ final class TilingController {
     }
 
     private func removeClosedWindows() {
-        let deadPanes = occupants.compactMap { pane, ref in windowIsDead(ref) ? pane : nil }
-        let hadDeadFloating = tabs[activeTabIndex].floating.contains { windowIsDead(WindowRef(pid: $0.pid, window: $0.window)) }
-        guard !deadPanes.isEmpty || hadDeadFloating else { return }
-
-        for pane in deadPanes {
-            tree.remove(pane)
-            occupants[pane] = nil
-            if zoomedPane == pane { zoomedPane = nil }
+        var changed = false
+        for i in tabs.indices {
+            let deadPanes = tabs[i].occupants.compactMap { pane, ref in windowIsDead(ref) ? pane : nil }
+            for pane in deadPanes {
+                tabs[i].tree.remove(pane)
+                tabs[i].occupants[pane] = nil
+                if tabs[i].focusedPane == pane {
+                    tabs[i].focusedPane = tabs[i].tree.paneIDs.first ?? PaneID(0)
+                }
+                if i == activeTabIndex && zoomedPane == pane { zoomedPane = nil }
+                changed = true
+            }
+            let floatingBefore = tabs[i].floating.count
+            tabs[i].floating.removeAll { windowIsDead(WindowRef(pid: $0.pid, window: $0.window)) }
+            if tabs[i].floating.count != floatingBefore { changed = true }
         }
-        tabs[activeTabIndex].floating.removeAll { windowIsDead(WindowRef(pid: $0.pid, window: $0.window)) }
-        if occupants[focusedPane] == nil {
-            focusedPane = tree.paneIDs.first ?? PaneID(0)
-        }
+        guard changed else { return }
+        gcEmptyTabs()
         relayout()
         applyWorkspaceVisibility()
     }
@@ -342,7 +347,7 @@ final class TilingController {
             if self?.fill(newPane, with: item) == false { self?.cancelPending() }
         }
         palette.onCancel = { [weak self] in self?.cancelPending() }
-        palette.present(anchorRectAX: paneRect, excludingWindowIDs: occupiedWindowIDs())
+        palette.present(anchorRectAX: paneRect, excludingWindowIDs: [])
     }
 
     /// Zoom the focused pane to fill the whole workspace (other tiled windows
@@ -489,10 +494,18 @@ final class TilingController {
         if occupants.isEmpty {
             occupants[PaneID(0)] = ref
             focusedPane = PaneID(0)
-        } else if let newPane = tree.split(focusedPane, orientation: .horizontal) {
+        } else if let newPane = tree.split(focusedPane, orientation: dynamicSplitOrientation()) {
             occupants[newPane] = ref
             focusedPane = newPane
         }
+    }
+
+    /// Split along the focused pane's longer axis, so an auto-placed window snaps
+    /// into the direction with more room: a wide pane splits side-by-side
+    /// (horizontal), a tall pane splits stacked (vertical).
+    private func dynamicSplitOrientation() -> SplitOrientation {
+        guard let rect = frames()[focusedPane] else { return .horizontal }
+        return rect.width >= rect.height ? .horizontal : .vertical
     }
 
     private func centeredFloatRect() -> CGRect {
@@ -533,7 +546,7 @@ final class TilingController {
             self?.pendingPane = nil
             self?.overlay.hide()
         }
-        palette.present(anchorRectAX: rect, excludingWindowIDs: occupiedWindowIDs())
+        palette.present(anchorRectAX: rect, excludingWindowIDs: [])
     }
 
     /// Convenience for modal keys: move the window when `move` is true, else
@@ -665,8 +678,41 @@ final class TilingController {
         }
     }
 
-    /// CGWindowIDs already occupying a pane in any tab — the palette excludes
-    /// these so a window can't be placed into two panes.
+    /// Remove a window (by id) from wherever it's tiled/floating across all tabs,
+    /// so it can be re-placed. Emptied panes collapse.
+    private func detachWindow(_ id: CGWindowID) {
+        for i in tabs.indices {
+            if let pane = tabs[i].occupants.first(where: { $0.value.window.windowID == id })?.key {
+                tabs[i].tree.remove(pane)
+                tabs[i].occupants[pane] = nil
+                if tabs[i].focusedPane == pane {
+                    tabs[i].focusedPane = tabs[i].tree.paneIDs.first ?? PaneID(0)
+                }
+            }
+            tabs[i].floating.removeAll { $0.window.windowID == id }
+        }
+    }
+
+    /// Remove empty tabs (no tiled or floating windows), except the active one,
+    /// so composing tabs by pulling windows around cleans up after itself.
+    private func gcEmptyTabs() {
+        guard tabs.count > 1 else { return }
+        var kept: [Tab] = []
+        var newActive = 0
+        for (i, tab) in tabs.enumerated() {
+            let isEmpty = tab.occupants.isEmpty && tab.floating.isEmpty
+            if i == activeTabIndex || !isEmpty {
+                if i == activeTabIndex { newActive = kept.count }
+                kept.append(tab)
+            }
+        }
+        if kept.count != tabs.count {
+            tabs = kept
+            activeTabIndex = newActive
+            onWorkspaceChange?()
+        }
+    }
+
     func occupiedWindowIDs() -> Set<CGWindowID> {
         var ids = Set<CGWindowID>()
         for tab in tabs {
@@ -701,7 +747,7 @@ final class TilingController {
             self?.pendingPane = nil
             self?.overlay.hide()
         }
-        palette.present(anchorRectAX: rect, excludingWindowIDs: occupiedWindowIDs())
+        palette.present(anchorRectAX: rect, excludingWindowIDs: [])
     }
 
     /// Tear down the tiling session: bring every tab's windows back on-screen
@@ -752,7 +798,7 @@ final class TilingController {
             if self?.fill(firstPane, with: item) == false { self?.cancelNewTab() }
         }
         palette.onCancel = { [weak self] in self?.cancelNewTab() }
-        palette.present(anchorRectAX: paneRect, excludingWindowIDs: occupiedWindowIDs())
+        palette.present(anchorRectAX: paneRect, excludingWindowIDs: [])
     }
 
     /// Roll back a new tab whose window picker was dismissed: drop the empty tab
@@ -792,9 +838,7 @@ final class TilingController {
             if let current = floater.window.frame { floater.frame = current }
             tabs[targetIndex].floating.append(floater)
             park(floater.window)
-            relayout()
-            applyWorkspaceVisibility()
-            onWorkspaceChange?()
+            finishMove(to: targetIndex)
             return
         }
 
@@ -807,10 +851,22 @@ final class TilingController {
         if occupants[focusedPane] == nil { focusedPane = tree.paneIDs.first ?? PaneID(0) }
 
         addToTab(targetIndex, ref: ref)
-        relayout()
         park(ref.window) // target tab is inactive → stash off-screen
-        applyWorkspaceVisibility()
-        onWorkspaceChange?()
+        finishMove(to: targetIndex)
+    }
+
+    /// After moving a window out: if the current tab is now empty, follow the
+    /// window to the target tab (and GC the emptied source); otherwise reflow
+    /// and stay put.
+    private func finishMove(to targetIndex: Int) {
+        if occupants.isEmpty && tabs[activeTabIndex].floating.isEmpty && tabs.count > 1 {
+            switchTo(targetIndex)
+            gcEmptyTabs() // drop the now-empty source tab
+        } else {
+            relayout()
+            applyWorkspaceVisibility()
+            onWorkspaceChange?()
+        }
     }
 
     /// Add a window to another tab's tiled layout (first pane if empty, else a
@@ -821,7 +877,9 @@ final class TilingController {
             tabs[index].focusedPane = PaneID(0)
         } else {
             let target = tabs[index].focusedPane
-            if let newPane = tabs[index].tree.split(target, orientation: .horizontal) {
+            let targetFrames = tabs[index].tree.frames(in: workspaceRect, config: config)
+            let orientation: SplitOrientation = (targetFrames[target]?.width ?? 1) >= (targetFrames[target]?.height ?? 0) ? .horizontal : .vertical
+            if let newPane = tabs[index].tree.split(target, orientation: orientation) {
                 tabs[index].occupants[newPane] = ref
                 tabs[index].focusedPane = newPane
             }
@@ -903,10 +961,14 @@ final class TilingController {
         overlay.hide()
         pendingPane = nil
         newTabReturnIndex = nil
+        // If this window is tiled/floating elsewhere, move it here (detach first),
+        // then clean up any tab left empty by the move.
+        if let id = ref.window.windowID { detachWindow(id) }
         occupants[pane] = ref
         focusedPane = pane
         relayout()
         focus(ref)
+        gcEmptyTabs()
         applyWorkspaceVisibility()
         return true
     }
@@ -980,22 +1042,23 @@ final class TilingController {
         let occupied = occupiedWindowIDs()
         switch item.kind {
         case .window(let windowID):
-            // Already-tiled windows are filtered from the palette, but guard here
-            // too in case the list was stale.
-            guard let pid = item.pid, !occupied.contains(windowID),
+            // A window already tiled elsewhere is allowed — fill() detaches it
+            // from its old spot and moves it here.
+            guard let pid = item.pid,
                   let window = AppTargeter.window(pid: pid, windowID: windowID) else { return nil }
             return WindowRef(pid: pid, window: window)
         case .application:
-            // Pick the app's first window that isn't already occupied — picking
-            // the app shouldn't re-home a window that's tiled elsewhere.
+            // Prefer an un-tiled window of the app; if all are tiled, move its
+            // first window here.
             guard let bundleID = item.bundleID,
                   let appElement = try? AppTargeter.applicationElement(bundleID: bundleID, launchIfNeeded: true),
                   let pid = AppTargeter.runningApp(bundleID: bundleID)?.processIdentifier else { return nil }
-            let free = AppTargeter.windows(of: appElement).first { window in
+            let windows = AppTargeter.windows(of: appElement)
+            let free = windows.first { window in
                 guard let id = window.windowID else { return false }
                 return !occupied.contains(id)
             }
-            guard let window = free else { return nil } // no un-tiled window available
+            guard let window = free ?? windows.first else { return nil }
             return WindowRef(pid: pid, window: window)
         }
     }
