@@ -6,7 +6,7 @@
 # grant to an app's code-signing identity + bundle path. A bare SPM executable
 # has no stable bundle identity, so its Accessibility access gets attributed to
 # the parent terminal instead — Tessera would never reliably control windows.
-# Packaging into a signed .app with a fixed bundle id (cloud.facets.tessera)
+# Packaging into a signed .app with a fixed bundle id (pramodh.ayyappan.tessera)
 # gives the grant something stable to attach to.
 #
 # Signing: by default this ad-hoc signs (`-`). Ad-hoc signatures change every

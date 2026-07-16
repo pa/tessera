@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>Tessera</string>
     <key>CFBundleIdentifier</key>
-    <string>cloud.facets.tessera</string>
+    <string>pramodh.ayyappan.tessera</string>
     <key>CFBundleExecutable</key>
     <string>Tessera</string>
     <key>CFBundlePackageType</key>

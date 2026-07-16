@@ -8,7 +8,7 @@ import Foundation
 /// Accessibility grant on every update. To fix that for free, on launch we
 /// re-sign the binary with a **per-user self-signed cert** (created once on this
 /// machine). Every version then shares the same DR
-/// (`identifier "cloud.facets.tessera" and certificate leaf = H"<user cert>"`),
+/// (`identifier "pramodh.ayyappan.tessera" and certificate leaf = H"<user cert>"`),
 /// and TCC — which matches on the DR, not the path — keeps the grant.
 ///
 /// Flow: if already signed with the cert, do nothing. Otherwise create the cert

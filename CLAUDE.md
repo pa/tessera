@@ -34,7 +34,7 @@ grant across upgrades:
 
 1. **Embedded Info.plist.** `Package.swift` passes `-sectcreate __TEXT
    __info_plist Resources/Info.plist` linker flags, so `swift build` bakes the
-   plist (LSUIElement + `CFBundleIdentifier=cloud.facets.tessera`) into the
+   plist (LSUIElement + `CFBundleIdentifier=pramodh.ayyappan.tessera`) into the
    Mach-O's `__TEXT,__info_plist` section. `codesign` binds it on signing, so
    the bare executable has a real bundle identity with no `.app` around it.
 2. **Self-sign on launch (`SelfSign.swift`).** A Homebrew source build (and each
@@ -45,7 +45,7 @@ grant across upgrades:
    `scripts/create-signing-cert.sh`, embedded as a string), `codesign --force
    --sign`s its own on-disk binary, and re-execs once (guarded by
    `TESSERA_SELFSIGN_DONE` against loops). Every version then shares one stable
-   DR — `identifier "cloud.facets.tessera" and certificate leaf = H"<user cert>"`
+   DR — `identifier "pramodh.ayyappan.tessera" and certificate leaf = H"<user cert>"`
    — and because TCC matches on the DR (not the path), the Accessibility grant
    **persists across upgrades**. The cert is created per-machine, so the leaf
    hash differs per user; each user grants Accessibility exactly once.
@@ -67,14 +67,14 @@ Accessibility access is attributed to the *parent terminal* instead — the app
 can never reliably control windows. Always test through
 `./scripts/build-app.sh` + the `.app`, never `swift run`.
 
-- Bundle id: `cloud.facets.tessera` (fixed, in `Resources/Info.plist`).
+- Bundle id: `pramodh.ayyappan.tessera` (fixed, in `Resources/Info.plist`).
 - Default signing is **ad-hoc** (`-`). Ad-hoc signatures change every rebuild,
   so macOS re-prompts for Accessibility after each build. To make the grant
   stick, run `./scripts/create-signing-cert.sh` once — it creates a self-signed
   "Tessera Code Signing" identity in a dedicated keychain (non-interactive) —
   then build with `CODESIGN_IDENTITY="Tessera Code Signing" ./scripts/build-app.sh`.
   The identity gives a stable Designated Requirement (`identifier
-  cloud.facets.tessera and certificate leaf = H"…"`) that TCC keys the grant to.
+  pramodh.ayyappan.tessera and certificate leaf = H"…"`) that TCC keys the grant to.
   Switching signing identity (ad-hoc → cert, or regenerating the cert) requires
   re-granting Accessibility once.
 
