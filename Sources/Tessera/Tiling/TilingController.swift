@@ -465,6 +465,47 @@ final class TilingController {
         focus(ref)
     }
 
+    /// Where a managed window lives: which tab, and whether it's tiled or floating.
+    private enum Location { case pane(PaneID), floating }
+
+    /// Find the tab + slot holding `windowID`, scanning every tab (not just the
+    /// active one).
+    private func locate(_ windowID: CGWindowID) -> (tab: Int, kind: Location)? {
+        for (i, tab) in tabs.enumerated() {
+            if let pane = tab.occupants.first(where: { $0.value.window.windowID == windowID })?.key {
+                return (i, .pane(pane))
+            }
+            if tab.floating.contains(where: { $0.window.windowID == windowID }) {
+                return (i, .floating)
+            }
+        }
+        return nil
+    }
+
+    /// The user switched to an app via Cmd-Tab or a third-party switcher. If its
+    /// focused window is one we manage in *another* tab, switch to that tab so the
+    /// window appears in its place — otherwise macOS un-hides it on top of the
+    /// tab the user is currently looking at. No-op if the window is unmanaged or
+    /// already in the active tab (that just tracks focus).
+    func revealTab(forActivatedApp pid: pid_t) {
+        guard pendingPane == nil else { return }
+        // Activation notifications are delivered async, and hiding a tab's apps
+        // during a switch briefly activates others. Only follow the app that is
+        // *actually* frontmost now, so those transient activations don't thrash tabs.
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+        guard let window = AppTargeter.focusedWindow(ofPID: pid),
+              let windowID = window.windowID,
+              let location = locate(windowID) else { return }
+        if location.tab == activeTabIndex {
+            if case .pane(let pane) = location.kind { focusedPane = pane }
+            return
+        }
+        switch location.kind {
+        case .pane(let pane): focusPane(tabIndex: location.tab, pane: pane)
+        case .floating: focusFloating(tabIndex: location.tab, windowID: windowID)
+        }
+    }
+
     /// Switch to `tabIndex` if needed and raise a specific floating window.
     func focusFloating(tabIndex: Int, windowID: CGWindowID) {
         if tabIndex != activeTabIndex { switchTo(tabIndex) }

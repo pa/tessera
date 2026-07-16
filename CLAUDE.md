@@ -187,6 +187,11 @@ All six brief milestones are complete.
 - **Layout enforcement** — a 0.6s timer re-snaps windows dragged/resized outside
   Tessera and removes panes whose window was closed (BSP collapse → neighbor
   fills).
+- **Follow-to-tab on app switch** — activating a managed window via Cmd-Tab or a
+  third-party switcher switches to the tab that holds it (via
+  `didActivateApplicationNotification` → `revealTab`), instead of letting macOS
+  un-hide it on top of the current tab. Guarded on the app being the real
+  frontmost, so a switch's own hide-others churn doesn't thrash tabs.
 - **Change Pane Window** — re-pick the focused pane's window via the palette.
 - **Full-screen (zoom)** — the focused pane fills the workspace; others park
   off-screen. Toggles; auto-clears on tab switch / reset / window close.

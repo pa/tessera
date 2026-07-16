@@ -358,7 +358,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.processIdentifier != ownPID else { return }
-            MainActor.assumeIsolated { self?.lastActiveAppPID = app.processIdentifier }
+            let pid = app.processIdentifier
+            MainActor.assumeIsolated {
+                self?.lastActiveAppPID = pid
+                // If the user switched (Cmd-Tab / third-party switcher) to a window
+                // we manage in another tab, follow it there instead of letting it
+                // render over the current tab.
+                self?.tiling.revealTab(forActivatedApp: pid)
+            }
         }
     }
 
