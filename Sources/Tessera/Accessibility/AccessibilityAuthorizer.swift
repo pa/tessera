@@ -5,10 +5,18 @@ import AppKit
 ///
 /// Tessera can only puppet other apps' windows once the user has granted it
 /// Accessibility access under System Settings → Privacy & Security →
-/// Accessibility. The grant is keyed to the app's code signature + bundle path,
-/// which is why Tessera must run as a signed `.app` bundle (see scripts/build-app.sh)
-/// rather than a bare executable — a bare binary's trust is attributed to the
-/// parent terminal instead.
+/// Accessibility. TCC keys the grant to the code-signing **Designated
+/// Requirement** (`identifier + certificate leaf`), which is path-independent.
+/// Both the dev `.app` (scripts/build-app.sh) and the bare Homebrew binary sign
+/// with the same per-user cert and bundle id, so they share one DR — a single
+/// grant covers both. The bare binary makes this work by (a) self-signing with
+/// that cert on launch and (b) disclaiming the launching terminal's
+/// responsibility (see SelfSign), so the grant is attributed to Tessera itself
+/// rather than the parent terminal.
+///
+/// Note: `AXIsProcessTrusted()` reflects the live TCC state, but macOS often
+/// caches a *false* result for the lifetime of a process that was denied at
+/// launch — so a first-time grant usually only takes effect after relaunch.
 enum AccessibilityAuthorizer {
     /// True if this process is currently trusted for Accessibility. Does not prompt.
     static var isTrusted: Bool {
