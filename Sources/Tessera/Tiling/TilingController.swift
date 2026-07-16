@@ -207,6 +207,9 @@ final class TilingController {
         let now = Date()
         let oversized = occupants.compactMap { pane, ref -> (PaneID, WindowRef, CGRect)? in
             guard let rect = frames[pane], let actual = ref.window.frame else { return nil }
+            // A native-fullscreen window fills the display (it's in its own Space);
+            // that's not "oversized for its pane" — leave it and its pane alone.
+            if ref.window.isFullscreen { return nil }
             // Skip windows still within their settle grace period.
             if let id = ref.window.windowID, let placed = placedAt[id], now.timeIntervalSince(placed) < floatGrace {
                 return nil
@@ -340,6 +343,9 @@ final class TilingController {
         var snapped = false
         for (pane, ref) in occupants {
             guard let expected = frames[pane], let current = ref.window.frame else { continue }
+            // Don't fight a native-fullscreen window back into its pane — it's in
+            // its own Space. It re-snaps naturally on the first tick after it exits.
+            if ref.window.isFullscreen { continue }
             if !current.approximatelyEqual(to: expected, tolerance: 8) {
                 ref.window.setFrame(expected)
                 snapped = true

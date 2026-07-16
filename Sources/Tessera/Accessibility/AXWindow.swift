@@ -79,6 +79,19 @@ struct AXWindow {
         return stringAttribute(kAXRoleAttribute) == (kAXWindowRole as String)
     }
 
+    /// True when the window is in macOS **native fullscreen** (it has moved to
+    /// its own Space and fills the display). Read via the undocumented
+    /// `AXFullScreen` attribute that Safari/Chrome/most AppKit apps expose — the
+    /// same signal yabai/AeroSpace use. A fullscreen window has left the tiling
+    /// area, so Tessera must leave it alone (no re-snap, no float-out, don't
+    /// disturb its pane) until it returns.
+    var isFullscreen: Bool {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &value) == .success
+        else { return false }
+        return (value as? Bool) ?? false
+    }
+
     var isMinimized: Bool {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXMinimizedAttribute as CFString, &value) == .success

@@ -194,7 +194,15 @@ All six brief milestones are complete.
   frontmost, so a switch's own hide-others churn doesn't thrash tabs.
 - **Change Pane Window** — re-pick the focused pane's window via the palette.
 - **Full-screen (zoom)** — the focused pane fills the workspace; others park
-  off-screen. Toggles; auto-clears on tab switch / reset / window close.
+  off-screen. Toggles; auto-clears on tab switch / reset / window close. Distinct
+  from macOS **native** fullscreen (below).
+- **Native-fullscreen exemption** — a window in macOS native fullscreen (e.g. a
+  browser video ⛶, which moves it to its own Space and fills the display) is
+  detected via the `AXFullScreen` attribute and left entirely alone: not
+  float-ed out for overflowing its pane, not re-snapped by enforcement, its pane
+  preserved. Without this, the enforcement/float loops floated it and moved
+  `focusedPane`, so exiting fullscreen landed focus on a *different* window. It
+  re-snaps to its pane on the first tick after exiting.
 - **Floating panes** — toggle a window out of the BSP tree to float above the
   tiles (centered), move it freely with hjkl in Pane mode, and re-tile it.
   Floating windows are exempt from layout enforcement; they park/restore with
