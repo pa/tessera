@@ -159,30 +159,50 @@ final class TilingController {
 
     // MARK: - Layout enforcement
 
-    /// Start the timer that drops closed windows and re-snaps drifted ones.
+    private var idleTicks = 0
+    private let activeInterval: TimeInterval = 0.5
+    private let idleInterval: TimeInterval = 2.0
+
+    /// Start the maintenance loop (drops closed windows, adopts new ones,
+    /// re-snaps drifted ones). Self-reschedules at an adaptive interval: fast
+    /// while things are changing, slow when idle — cutting CPU when the layout
+    /// is quiet.
     func startEnforcing() {
         // Seed the known-window set so existing windows aren't grabbed all at
         // once; only windows opened after startup auto-tile.
         knownWindowIDs = allStandardWindowIDs()
+        scheduleTick(after: activeInterval)
+    }
+
+    private func scheduleTick(after interval: TimeInterval) {
         enforcementTimer?.invalidate()
-        enforcementTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.maintainLayout() }
+        enforcementTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
         }
     }
 
-    private func maintainLayout() {
-        guard pendingPane == nil else { return } // don't disturb a split-in-progress
-        removeClosedWindows()
-        if autoTileEnabled { autoTileNewWindows() }
-        floatOversizedWindows()
-        enforceLayout()
+    private func tick() {
+        let didWork = maintainLayout()
+        idleTicks = didWork ? 0 : min(idleTicks + 1, 6)
+        scheduleTick(after: idleTicks >= 3 ? idleInterval : activeInterval)
+    }
+
+    @discardableResult
+    private func maintainLayout() -> Bool {
+        guard pendingPane == nil else { return false } // don't disturb a split-in-progress
+        var acted = removeClosedWindows()
+        if autoTileEnabled { acted = autoTileNewWindows() || acted }
+        acted = floatOversizedWindows() || acted
+        acted = enforceLayout() || acted
+        return acted
     }
 
     /// A window that refuses to shrink to its pane (min-size apps) spills over its
     /// neighbors. Pop such windows out to floating so the pane collapses and the
     /// remaining tiles reclaim the space.
-    private func floatOversizedWindows() {
-        guard !tabs[activeTabIndex].stacked, zoomedPane == nil else { return }
+    @discardableResult
+    private func floatOversizedWindows() -> Bool {
+        guard !tabs[activeTabIndex].stacked, zoomedPane == nil else { return false }
         let frames = self.frames()
         let now = Date()
         let oversized = occupants.compactMap { pane, ref -> (PaneID, WindowRef, CGRect)? in
@@ -194,7 +214,7 @@ final class TilingController {
             let overflows = actual.width > rect.width + 24 || actual.height > rect.height + 24
             return overflows ? (pane, ref, actual) : nil
         }
-        guard !oversized.isEmpty else { return }
+        guard !oversized.isEmpty else { return false }
 
         for (pane, ref, actual) in oversized {
             tree.remove(pane)
@@ -204,6 +224,7 @@ final class TilingController {
         }
         relayout()
         applyWorkspaceVisibility()
+        return true
     }
 
     /// Adopt a just-created window into the active tab, if auto-tiling is on and
@@ -235,7 +256,8 @@ final class TilingController {
     /// Adopt any newly-opened standard window into the active tab (splitting the
     /// focused pane). Window-based, so different windows of one app can live in
     /// different tabs.
-    private func autoTileNewWindows() {
+    @discardableResult
+    private func autoTileNewWindows() -> Bool {
         let managed = occupiedWindowIDs()
         var current = Set<CGWindowID>()
         var addedAny = false
@@ -259,6 +281,7 @@ final class TilingController {
             applyWorkspaceVisibility()
             onWorkspaceChange?()
         }
+        return addedAny
     }
 
     /// Drop panes whose window was closed; the BSP tree collapses so the
@@ -271,7 +294,8 @@ final class TilingController {
         return !ref.window.isAlive
     }
 
-    private func removeClosedWindows() {
+    @discardableResult
+    private func removeClosedWindows() -> Bool {
         var changed = false
         for i in tabs.indices {
             let deadPanes = tabs[i].occupants.compactMap { pane, ref in windowIsDead(ref) ? pane : nil }
@@ -288,33 +312,40 @@ final class TilingController {
             tabs[i].floating.removeAll { windowIsDead(WindowRef(pid: $0.pid, window: $0.window)) }
             if tabs[i].floating.count != floatingBefore { changed = true }
         }
-        guard changed else { return }
+        guard changed else { return false }
         gcEmptyTabs()
         relayout()
         applyWorkspaceVisibility()
+        return true
     }
 
     /// Re-snap any active-tab window that has drifted from its pane frame (the
     /// user resized/moved it outside Tessera). Windows already at their frame are
-    /// left alone, so this never fights our own layout changes.
-    private func enforceLayout() {
+    /// left alone, so this never fights our own layout changes. Returns whether
+    /// any window was re-snapped (so the loop knows something changed).
+    @discardableResult
+    private func enforceLayout() -> Bool {
         // Stacked windows all target the same full-screen rect; re-snapping every
         // tick fights apps that clamp their size (flicker). Positioning happens
         // on toggle/cycle instead.
-        if tabs[activeTabIndex].stacked { return }
+        if tabs[activeTabIndex].stacked { return false }
         if let zoomed = zoomedPane, let ref = occupants[zoomed] {
             if let current = ref.window.frame, !current.approximatelyEqual(to: zoomFrame, tolerance: 8) {
                 ref.window.setFrame(zoomFrame)
+                return true
             }
-            return
+            return false
         }
         let frames = self.frames()
+        var snapped = false
         for (pane, ref) in occupants {
             guard let expected = frames[pane], let current = ref.window.frame else { continue }
             if !current.approximatelyEqual(to: expected, tolerance: 8) {
                 ref.window.setFrame(expected)
+                snapped = true
             }
         }
+        return snapped
     }
 
     /// Unhide every app and bring all managed windows back on-screen — for quit.
@@ -886,6 +917,9 @@ final class TilingController {
     // MARK: - Tabs
 
     var tabSummary: (index: Int, count: Int) { (activeTabIndex, tabs.count) }
+
+    /// Number of tiled windows in the active tab (0 or 1 means nothing to resize).
+    var activePaneCount: Int { occupants.count }
 
     /// Open a fresh tab: hide the current tab's apps, then pop the palette to
     /// pick the window that fills the new tab. Cancelling returns to the tab you

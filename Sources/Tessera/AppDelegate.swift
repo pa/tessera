@@ -271,7 +271,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// temporarily overrides it with its own glyph (▚ P/T/R).
     private func applyMode(_ mode: ModeEngine.Mode) {
         statusItem.button?.title = (mode == .normal) ? tabIndicator() : mode.glyph
-        if let hint = mode.hudText {
+        if mode == .resize && tiling.activePaneCount <= 1 {
+            modeHUD.show("RESIZE   single pane — nothing to resize · ⏎/esc done")
+        } else if let hint = mode.hudText {
             modeHUD.show(hint)
         } else {
             modeHUD.hide()
