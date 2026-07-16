@@ -1,43 +1,66 @@
 import Foundation
 
-/// Makes the Accessibility grant survive `brew upgrade` without an Apple
-/// Developer ID.
+// Private "responsibility" SPI. macOS attributes a process's TCC prompts
+// (Accessibility, etc.) to its *responsible* process — for a binary launched
+// from a terminal, that's the terminal (e.g. Alacritty), not us. Disclaiming it
+// on a re-spawn makes Tessera its own responsible process, so the Accessibility
+// grant is attributed to "Tessera". Same symbols yabai/AeroSpace-style tools use.
+@_silgen_name("responsibility_spawnattrs_setdisclaim")
+private func responsibility_spawnattrs_setdisclaim(
+    _ attrs: UnsafeMutablePointer<posix_spawnattr_t?>, _ disclaim: Int32) -> Int32
+@_silgen_name("responsibility_get_pid_responsible_for_pid")
+private func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t
+
+/// Launch bootstrap that makes Tessera behave like a first-class agent from a
+/// bare binary — no `.app`, no Apple Developer ID. Two jobs:
 ///
-/// A Homebrew source build (and each upgrade) produces an **ad-hoc** signature,
-/// whose Designated Requirement is the exact code hash — so TCC drops the
-/// Accessibility grant on every update. To fix that for free, on launch we
-/// re-sign the binary with a **per-user self-signed cert** (created once on this
-/// machine). Every version then shares the same DR
-/// (`identifier "pramodh.ayyappan.tessera" and certificate leaf = H"<user cert>"`),
-/// and TCC — which matches on the DR, not the path — keeps the grant.
+/// 1. **Stable signature (grant survives `brew upgrade`).** A Homebrew source
+///    build (and each upgrade) is **ad-hoc** signed, whose Designated
+///    Requirement is the exact code hash — so TCC would drop the Accessibility
+///    grant on every update. We re-sign the binary with a **per-user self-signed
+///    cert** (created once on this machine). Every version then shares one DR
+///    (`identifier "pramodh.ayyappan.tessera" and certificate leaf = H"<cert>"`),
+///    and TCC — which matches the DR, not the path — keeps the grant.
 ///
-/// Flow: if already signed with the cert, do nothing. Otherwise create the cert
-/// if missing, `codesign` this binary, and re-exec once (guarded against loops).
+/// 2. **Correct TCC attribution (grant shows "Tessera", not the terminal).**
+///    When launched from a terminal, macOS blames the terminal for our TCC
+///    prompts. We disclaim that responsibility on the re-spawn so the grant is
+///    attributed to Tessera itself.
+///
+/// If already signed *and* self-responsible, do nothing. Otherwise fix whichever
+/// is wrong and re-exec once — disclaiming the terminal — guarded against loops.
 enum SelfSign {
     static let identity = "Tessera Code Signing"
     private static let loopGuardEnv = "TESSERA_SELFSIGN_DONE"
 
-    static func ensureSignedAndRelaunch() {
+    static func bootstrap() {
         guard let path = executablePath() else { return }
-        if isSigned(path, with: identity) { return } // already stable-signed
+        let signed = isSigned(path, with: identity)
+        let selfResponsible = isSelfResponsible()
+        if signed && selfResponsible { return } // nothing to fix
 
         // Don't loop if a prior attempt didn't take.
         if ProcessInfo.processInfo.environment[loopGuardEnv] == "1" {
-            NSLog("Tessera: still not signed with '\(identity)' after self-sign; running ad-hoc.")
+            if !signed { NSLog("Tessera: still not signed with '\(identity)'; running ad-hoc.") }
+            if !selfResponsible { NSLog("Tessera: could not disclaim terminal responsibility.") }
             return
         }
 
-        if !certExists(identity) {
-            guard createCert() else {
-                NSLog("Tessera: could not create signing cert; running ad-hoc.")
+        if !signed {
+            if !certExists(identity) {
+                guard createCert() else {
+                    NSLog("Tessera: could not create signing cert; running ad-hoc.")
+                    return
+                }
+            }
+            guard sign(path, with: identity) else {
+                NSLog("Tessera: self-sign failed; running ad-hoc.")
                 return
             }
         }
-        guard sign(path, with: identity) else {
-            NSLog("Tessera: self-sign failed; running ad-hoc.")
-            return
-        }
-        relaunch(path)
+        // Re-exec disclaimed: runs the freshly-signed binary AND makes us our own
+        // responsible process, so TCC shows "Tessera".
+        relaunchDisclaimed(path)
     }
 
     // MARK: - Steps
@@ -74,12 +97,31 @@ enum SelfSign {
         return run("/bin/bash", [scriptURL.path]).status == 0 && certExists(identity)
     }
 
-    private static func relaunch(_ path: String) {
+    /// True unless macOS clearly names a *different* process as responsible for
+    /// us (the terminal case). Errors/unknown are treated as self-responsible so
+    /// we never relaunch needlessly (or loop).
+    private static func isSelfResponsible() -> Bool {
+        let me = getpid()
+        let responsible = responsibility_get_pid_responsible_for_pid(me)
+        return !(responsible > 0 && responsible != me)
+    }
+
+    /// Re-exec this binary in place, disclaiming the terminal's TCC
+    /// responsibility so the Accessibility grant is attributed to Tessera.
+    private static func relaunchDisclaimed(_ path: String) {
         setenv(loopGuardEnv, "1", 1)
-        var cArgs = CommandLine.arguments.map { strdup($0) }
-        cArgs.append(nil)
-        execv(path, &cArgs)
-        NSLog("Tessera: re-exec after self-sign failed (errno \(errno)).") // execv only returns on failure
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        _ = responsibility_spawnattrs_setdisclaim(&attr, 1)
+        // SETEXEC replaces the current image (like execv) instead of forking, so
+        // launchd/the shell keeps tracking the same pid — but now disclaimed.
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETEXEC))
+        var argv = CommandLine.arguments.map { strdup($0) }
+        argv.append(nil)
+        let rc = posix_spawn(nil, path, nil, &attr, argv, environ)
+        // With POSIX_SPAWN_SETEXEC this only returns on failure.
+        NSLog("Tessera: disclaimed relaunch failed (rc \(rc)); continuing in place.")
     }
 
     // MARK: - Process helper
