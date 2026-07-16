@@ -75,9 +75,22 @@ final class TilingController {
     /// can refresh.
     var onWorkspaceChange: (() -> Void)?
 
-    /// A little breathing room between panes and around the workspace so tiled
-    /// windows don't butt right up against each other or the screen edge.
-    private let config = LayoutConfig(outerGap: 8, innerGap: 8)
+    /// Tile gap as a percentage of screen width (user-configurable in Settings).
+    /// Drives both the outer margin and the inter-pane gaps.
+    private var paddingPercent: Double = SettingsStore.load().paddingPercent
+
+    /// A little breathing room between panes and around the workspace, derived
+    /// from `paddingPercent` against the current screen width.
+    private var config: LayoutConfig {
+        let gap = (paddingPercent / 100.0) * workspaceRect.width
+        return LayoutConfig(outerGap: gap, innerGap: gap)
+    }
+
+    /// Apply a new padding percentage from Settings and re-tile immediately.
+    func updatePaddingPercent(_ percent: Double) {
+        paddingPercent = percent
+        relayout()
+    }
 
     private var workspaceRect: CGRect { ScreenGeometry.mainUsableBounds }
 

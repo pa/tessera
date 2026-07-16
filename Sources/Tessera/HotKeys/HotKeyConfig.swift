@@ -62,26 +62,15 @@ struct KeyBinding: Codable, Equatable {
     }
 }
 
-/// A full set of bindings plus which preset produced it.
+/// The full set of bindings. There's a single built-in default set (no more
+/// presets); the user customizes individual chords in Settings and can reset the
+/// whole set back to `defaults`.
 struct KeyBindingSet: Codable, Equatable {
-    enum Preset: String, Codable, CaseIterable {
-        case tessera, tmux, zellij, custom
-        var title: String {
-            switch self {
-            case .tessera: return "Tessera"
-            case .tmux: return "tmux-inspired"
-            case .zellij: return "zellij-inspired"
-            case .custom: return "Custom"
-            }
-        }
-    }
-
-    var preset: Preset
     var bindings: [TilingCommand: KeyBinding]
 
-    // MARK: - Presets
+    // MARK: - Default set
 
-    /// Focus movement is hjkl in every preset; window-move is ⇧ + hjkl.
+    /// Focus movement is hjkl; window-move is ⇧ + hjkl.
     private static let focusKeys: [TilingCommand: Int] = [
         .focusLeft: kVK_ANSI_H, .focusDown: kVK_ANSI_J,
         .focusUp: kVK_ANSI_K, .focusRight: kVK_ANSI_L,
@@ -91,54 +80,31 @@ struct KeyBindingSet: Codable, Equatable {
         .moveUp: kVK_ANSI_K, .moveRight: kVK_ANSI_L,
     ]
 
-    /// Tessera default: ⌃⌥⌘ prefix, vim hjkl focus, ⇧+hjkl to move windows.
-    static let tessera = KeyBindingSet(preset: .tessera, bindings: assemble(
+    /// The built-in defaults: ⌃⌥⌘ prefix, vim hjkl focus, ⇧+hjkl to move windows,
+    /// and the command palette / workspace navigator on all four modifiers
+    /// (⌃⌥⌘⇧) + P / + W. Every chord is rebindable in Settings.
+    static let defaults = KeyBindingSet(bindings: assemble(
         base: [.control, .option, .command],
         baseKeys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
                    .newTab: kVK_ANSI_T, .nextTab: kVK_ANSI_RightBracket,
-                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
-                   .palette: kVK_Space, .navigator: kVK_ANSI_O].merging(focusKeys) { a, _ in a }
+                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R].merging(focusKeys) { a, _ in a }
     ))
-
-    /// tmux-inspired: ⌃⌥ prefix, tmux's letter mnemonics (c new, n/p next/prev),
-    /// hjkl focus, ⇧+hjkl move.
-    static let tmux = KeyBindingSet(preset: .tmux, bindings: assemble(
-        base: [.control, .option],
-        baseKeys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
-                   .newTab: kVK_ANSI_C, .nextTab: kVK_ANSI_N,
-                   .previousTab: kVK_ANSI_P, .reset: kVK_ANSI_R,
-                   .palette: kVK_Space, .navigator: kVK_ANSI_O].merging(focusKeys) { a, _ in a }
-    ))
-
-    /// zellij-inspired: ⌥⌘ prefix, hjkl focus, =/- splits, ⇧+hjkl move.
-    static let zellij = KeyBindingSet(preset: .zellij, bindings: assemble(
-        base: [.option, .command],
-        baseKeys: [.splitRight: kVK_ANSI_Equal, .splitDown: kVK_ANSI_Minus,
-                   .newTab: kVK_ANSI_N, .nextTab: kVK_ANSI_RightBracket,
-                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R,
-                   .palette: kVK_Space, .navigator: kVK_ANSI_O].merging(focusKeys) { a, _ in a }
-    ))
-
-    static func preset(_ preset: Preset) -> KeyBindingSet {
-        switch preset {
-        case .tessera: return tessera
-        case .tmux: return tmux
-        case .zellij: return zellij
-        case .custom: return tessera // custom starts from the Tessera set
-        }
-    }
 
     /// Bind `baseKeys` at `base` modifiers and the shared move keys at
-    /// `base + ⇧` (so window-move mirrors focus with an added Shift). Mode-entry
-    /// keys are fixed at ⌃P / ⌃T across presets (zellij-style), rebindable in
-    /// preferences.
+    /// `base + ⇧` (so window-move mirrors focus with an added Shift). The command
+    /// palette and workspace navigator get all four modifiers + P / W. Mode-entry
+    /// keys are ⌃P / ⌃T / ⌃R (zellij-style), all rebindable in Settings.
     private static func assemble(base: NSEvent.ModifierFlags, baseKeys: [TilingCommand: Int]) -> [TilingCommand: KeyBinding] {
         let baseMods = KeySymbols.carbonModifiers(from: base)
-        let moveMods = KeySymbols.carbonModifiers(from: base.union(.shift))
+        let allMods = KeySymbols.carbonModifiers(from: base.union(.shift))
         var result = baseKeys.mapValues { KeyBinding(keyCode: $0, modifiers: baseMods) }
         for (command, keyCode) in moveKeys {
-            result[command] = KeyBinding(keyCode: keyCode, modifiers: moveMods)
+            result[command] = KeyBinding(keyCode: keyCode, modifiers: allMods)
         }
+        // Command palette / workspace navigator: all four modifiers + P / W.
+        result[.palette] = KeyBinding(keyCode: kVK_ANSI_P, modifiers: allMods)
+        result[.navigator] = KeyBinding(keyCode: kVK_ANSI_W, modifiers: allMods)
+        // Mode-entry chords (interpreted by the event tap).
         let control = UInt32(controlKey)
         result[.enterPaneMode] = KeyBinding(keyCode: kVK_ANSI_P, modifiers: control)
         result[.enterTabMode] = KeyBinding(keyCode: kVK_ANSI_T, modifiers: control)
@@ -157,15 +123,22 @@ enum HotKeyStore {
     }
 
     static func load() -> KeyBindingSet {
-        guard let data = try? Data(contentsOf: url),
-              var set = try? JSONDecoder().decode(KeyBindingSet.self, from: data) else {
-            return .tessera
+        guard let data = try? Data(contentsOf: url) else { return .defaults }
+        // Legacy files (pre-Settings) carried a "preset" field and preset-based
+        // defaults (palette on Space, navigator on O). Discard those so everyone
+        // lands on the current single default set — including the new
+        // command-palette / navigator chords (⌃⌥⌘⇧ + P / W).
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           obj["preset"] != nil {
+            return .defaults
         }
-        // Backfill commands added since the file was written (custom falls back
-        // to the Tessera defaults) so new features aren't left unbound.
-        let defaults = KeyBindingSet.preset(set.preset).bindings
+        guard var set = try? JSONDecoder().decode(KeyBindingSet.self, from: data) else {
+            return .defaults
+        }
+        // Backfill commands added since the file was written so new features
+        // aren't left unbound.
         for command in TilingCommand.allCases where set.bindings[command] == nil {
-            set.bindings[command] = defaults[command]
+            set.bindings[command] = KeyBindingSet.defaults.bindings[command]
         }
         return set
     }

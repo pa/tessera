@@ -156,16 +156,28 @@ of focused app, needs no extra permission, and only sees the chords it
 registers. Default prefix is ⌃⌥⌘ (a dedicated modifier so a global ⌘T doesn't
 shadow per-app shortcuts).
 
-**Configurable hotkeys (extension).** `HotKeyConfig` defines a `TilingCommand`
-enum, `KeyBinding` (Carbon keycode + modifier mask), and preset sets
-(Tessera / tmux-inspired / zellij-inspired / custom), persisted to
-`~/Library/Application Support/Tessera/hotkeys.json`. "Hotkey Settings…" opens
-`HotKeyPreferencesController`: a preset picker plus a `KeyRecorderView` per
-command to record custom chords; edits apply live (`HotKeyManager.unregisterAll`
-+ re-register) and switch the preset to Custom. The menu shows each command's
-current chord. Note: presets are distinct **chord sets** inspired by those
-tools, not a full modal prefix-key (leader) emulation — that would be a future
-enhancement.
+**Settings & configurable hotkeys.** A single **Settings window**
+(`SettingsWindowController`, opened from the menu bar or ⌘, when Tessera is
+active) with two tabs:
+- **General** — tile **padding** as a percentage of screen width (slider,
+  applied live via `TilingController.updatePaddingPercent`; persisted in
+  `AppSettings`/`settings.json`), plus the app **version** tag.
+- **Hotkeys** — a `KeyRecorderView` per `TilingCommand` to rebind any chord, and
+  **Reset to Defaults**. Edits apply live (`HotKeyManager.unregisterAll` +
+  re-register) and persist to `hotkeys.json`.
+
+`HotKeyConfig` defines the `TilingCommand` enum, `KeyBinding` (Carbon keycode +
+modifier mask), and a **single built-in default set** (no more
+Tessera/tmux/zellij presets — that concept was removed): ⌃⌥⌘ prefix, hjkl focus,
+⇧+hjkl move, and the command palette / workspace navigator on **all four
+modifiers (⌃⌥⌘⇧) + P / W**. Legacy `hotkeys.json` files (which carried a
+`preset` field) are discarded on load so everyone lands on the current defaults.
+
+The **menu bar is deliberately minimal**: Accessibility status, Command Palette,
+Workspace Navigator, Settings…, Quit. Every tiling/tab action lives on hotkeys
+and the modal layers instead (the old per-action menu rows were removed). The
+startup first-window prompt still fires when there's no saved session; there is
+no manual "Pick First Window" menu row (auto-tiling adopts new windows anyway).
 
 All six brief milestones are complete.
 

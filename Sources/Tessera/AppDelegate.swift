@@ -42,9 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return engine
     }()
     private var bindingSet = HotKeyStore.load()
-    private lazy var hotKeyPrefs: HotKeyPreferencesController = {
-        let controller = HotKeyPreferencesController(bindingSet: bindingSet)
-        controller.onChange = { [weak self] set in self?.applyBindings(set) }
+    private lazy var settingsWindow: SettingsWindowController = {
+        let controller = SettingsWindowController(bindingSet: bindingSet, settings: SettingsStore.load())
+        controller.onHotKeysChange = { [weak self] set in self?.applyBindings(set) }
+        controller.onPaddingChange = { [weak self] percent in self?.tiling.updatePaddingPercent(percent) }
         return controller
     }()
 
@@ -118,93 +119,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusRow)
 
         menu.addItem(.separator())
-        // Tiling actions. The chord in each title reflects the live binding set;
-        // the actual shortcut is handled globally by HotKeyManager, so menu
-        // items carry no key-equivalent (which would only fire when active).
+        // Deliberately minimal: the palette and navigator are the only actions
+        // here (everything else lives on hotkeys / modes). The chord in each
+        // title reflects the live binding set; the shortcut itself fires globally
+        // via HotKeyManager, so the items carry no key-equivalent.
         let palette = NSMenuItem(title: "Command Palette…\(chordSuffix(.palette))", action: #selector(openCommandPalette), keyEquivalent: "")
         palette.target = self
+        palette.isEnabled = trusted
         menu.addItem(palette)
         let navigatorItem = NSMenuItem(title: "Workspace Navigator…\(chordSuffix(.navigator))", action: #selector(openNavigator), keyEquivalent: "")
         navigatorItem.target = self
+        navigatorItem.isEnabled = trusted
         menu.addItem(navigatorItem)
-        let firstWindow = NSMenuItem(title: "Pick First Window…", action: #selector(pickFirstWindow), keyEquivalent: "")
-        firstWindow.target = self
-        firstWindow.isEnabled = trusted
-        menu.addItem(firstWindow)
-
-        let tileHeader = NSMenuItem(title: "Tiling", action: nil, keyEquivalent: "")
-        tileHeader.isEnabled = false
-        menu.addItem(tileHeader)
-        let splitRight = NSMenuItem(title: "Split Focused → Right\(chordSuffix(.splitRight))", action: #selector(splitRight), keyEquivalent: "")
-        splitRight.target = self
-        splitRight.isEnabled = trusted
-        menu.addItem(splitRight)
-        let splitDown = NSMenuItem(title: "Split Focused → Down\(chordSuffix(.splitDown))", action: #selector(splitDown), keyEquivalent: "")
-        splitDown.target = self
-        splitDown.isEnabled = trusted
-        menu.addItem(splitDown)
-        let fullscreen = NSMenuItem(title: "Toggle Fullscreen Pane", action: #selector(toggleFullscreen), keyEquivalent: "")
-        fullscreen.target = self
-        fullscreen.isEnabled = trusted
-        menu.addItem(fullscreen)
-        let floatPane = NSMenuItem(title: "Toggle Float Pane", action: #selector(toggleFloat), keyEquivalent: "")
-        floatPane.target = self
-        floatPane.isEnabled = trusted
-        menu.addItem(floatPane)
-        let changeWindow = NSMenuItem(title: "Change Pane Window…", action: #selector(changePaneWindow), keyEquivalent: "")
-        changeWindow.target = self
-        changeWindow.isEnabled = trusted
-        menu.addItem(changeWindow)
-        let stacked = NSMenuItem(title: "Toggle Stacked Layout", action: #selector(toggleStacked), keyEquivalent: "")
-        stacked.target = self
-        stacked.isEnabled = trusted
-        menu.addItem(stacked)
-        let balance = NSMenuItem(title: "Balance Sizes", action: #selector(balanceSizes), keyEquivalent: "")
-        balance.target = self
-        balance.isEnabled = trusted
-        menu.addItem(balance)
-        let solo = NSMenuItem(title: "Keep Only Focused Pane", action: #selector(soloPane), keyEquivalent: "")
-        solo.target = self
-        solo.isEnabled = trusted
-        menu.addItem(solo)
-        let resetTiling = NSMenuItem(title: "Reset Tiling\(chordSuffix(.reset))", action: #selector(resetTiling), keyEquivalent: "")
-        resetTiling.target = self
-        menu.addItem(resetTiling)
-
-        // Virtual tabs.
-        let tabs = tiling.tabSummary
-        let tabHeader = NSMenuItem(title: "Tabs  (tab \(tabs.index + 1) of \(tabs.count))", action: nil, keyEquivalent: "")
-        tabHeader.isEnabled = false
-        menu.addItem(tabHeader)
-        let newTab = NSMenuItem(title: "New Tab\(chordSuffix(.newTab))", action: #selector(newTab), keyEquivalent: "")
-        newTab.target = self
-        newTab.isEnabled = trusted
-        menu.addItem(newTab)
-        let nextTab = NSMenuItem(title: "Next Tab\(chordSuffix(.nextTab))", action: #selector(nextTab), keyEquivalent: "")
-        nextTab.target = self
-        nextTab.isEnabled = trusted && tabs.count > 1
-        menu.addItem(nextTab)
-        let prevTab = NSMenuItem(title: "Previous Tab\(chordSuffix(.previousTab))", action: #selector(previousTab), keyEquivalent: "")
-        prevTab.target = self
-        prevTab.isEnabled = trusted && tabs.count > 1
-        menu.addItem(prevTab)
-        let moveToNext = NSMenuItem(title: "Move Window → Next Tab", action: #selector(moveWindowToNextTab), keyEquivalent: "")
-        moveToNext.target = self
-        moveToNext.isEnabled = trusted && tabs.count > 1
-        menu.addItem(moveToNext)
-        let moveToPrev = NSMenuItem(title: "Move Window → Previous Tab", action: #selector(moveWindowToPrevTab), keyEquivalent: "")
-        moveToPrev.target = self
-        moveToPrev.isEnabled = trusted && tabs.count > 1
-        menu.addItem(moveToPrev)
-        let lastTab = NSMenuItem(title: "Toggle Last Tab", action: #selector(toggleLastTab), keyEquivalent: "")
-        lastTab.target = self
-        lastTab.isEnabled = trusted && tabs.count > 1
-        menu.addItem(lastTab)
 
         menu.addItem(.separator())
-        let hotkeySettings = NSMenuItem(title: "Hotkey Settings…", action: #selector(openHotKeyPreferences), keyEquivalent: "")
-        hotkeySettings.target = self
-        menu.addItem(hotkeySettings)
+        // ⌘, opens Settings when Tessera is active (e.g. this menu / a Tessera
+        // window); the menu item works regardless.
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = [.command]
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: "Quit Tessera", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -222,14 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalette.onCancel = nil
         commandPalette.present()
     }
-
-    @objc private func splitRight() { tiling.split(.horizontal) }
-    @objc private func splitDown() { tiling.split(.vertical) }
-    @objc private func resetTiling() { tiling.reset() }
-    @objc private func changePaneWindow() { tiling.changeFocusedPaneWindow() }
-    @objc private func toggleFullscreen() { tiling.toggleFullscreen() }
-    @objc private func toggleFloat() { tiling.toggleFloat() }
-    @objc private func pickFirstWindow() { tiling.promptFirstWindow() }
 
     @objc private func openNavigator() {
         let roots = tiling.workspaceSnapshot().map { tab -> WorkspaceNavigatorController.Node in
@@ -254,17 +180,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         navigator.show(roots: roots)
     }
-    @objc private func newTab() { tiling.newTab() }
-    @objc private func nextTab() { tiling.nextTab() }
-    @objc private func previousTab() { tiling.previousTab() }
-    @objc private func moveWindowToNextTab() { tiling.moveFocusedToNextTab() }
-    @objc private func moveWindowToPrevTab() { tiling.moveFocusedToPreviousTab() }
-    @objc private func toggleLastTab() { tiling.toggleLastTab() }
-    @objc private func balanceSizes() { tiling.balanceSizes() }
-    @objc private func soloPane() { tiling.soloFocusedPane() }
-    @objc private func toggleStacked() { tiling.toggleStacked() }
 
-    @objc private func openHotKeyPreferences() { hotKeyPrefs.show() }
+    @objc private func openSettings() { settingsWindow.show() }
 
     /// Reflect the active input mode in the menu-bar glyph and the HUD hint bar.
     /// In normal mode the glyph shows the current tab position (▚ 2/3); a mode
