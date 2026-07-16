@@ -16,6 +16,49 @@ open .build/Tessera.app           # launch the menu-bar agent
 Tessera is a menu-bar agent (`LSUIElement`), so there is no Dock icon or window
 — look for the `▚` glyph in the menu bar after launch.
 
+## Distribution: Homebrew, no Apple Developer ID
+
+Tessera ships as a **single Swift binary via a Homebrew tap** — no `.app`
+wrapper, no notarization, no $99/yr Developer ID, no Gatekeeper quarantine (a
+source build isn't downloaded, it's compiled locally, so nothing is quarantined
+— the same trick paneru uses).
+
+```sh
+brew tap facetscloud/tessera https://github.com/facetscloud/tessera
+brew install tessera
+brew services start tessera        # run now + at login
+```
+
+Two pieces make the bare binary a first-class agent that keeps its Accessibility
+grant across upgrades:
+
+1. **Embedded Info.plist.** `Package.swift` passes `-sectcreate __TEXT
+   __info_plist Resources/Info.plist` linker flags, so `swift build` bakes the
+   plist (LSUIElement + `CFBundleIdentifier=cloud.facets.tessera`) into the
+   Mach-O's `__TEXT,__info_plist` section. `codesign` binds it on signing, so
+   the bare executable has a real bundle identity with no `.app` around it.
+2. **Self-sign on launch (`SelfSign.swift`).** A Homebrew source build (and each
+   `brew upgrade`) is **ad-hoc** signed, whose DR is the exact code hash — so TCC
+   would drop the grant on every update. On launch, if the binary isn't already
+   signed with the per-user **"Tessera Code Signing"** cert, Tessera creates that
+   cert once (dedicated keychain, non-interactive — same logic as
+   `scripts/create-signing-cert.sh`, embedded as a string), `codesign --force
+   --sign`s its own on-disk binary, and re-execs once (guarded by
+   `TESSERA_SELFSIGN_DONE` against loops). Every version then shares one stable
+   DR — `identifier "cloud.facets.tessera" and certificate leaf = H"<user cert>"`
+   — and because TCC matches on the DR (not the path), the Accessibility grant
+   **persists across upgrades**. The cert is created per-machine, so the leaf
+   hash differs per user; each user grants Accessibility exactly once.
+   - Gotcha: detect the cert with `security find-identity -p codesigning` **without
+     `-v`**. A self-signed codesigning cert always reports
+     `CSSMERR_TP_NOT_TRUSTED`, so the valid-only (`-v`) listing hides it even
+     though `codesign` signs with it fine — using `-v` would make SelfSign think
+     the cert is missing and recreate it, minting a new leaf and losing the grant.
+
+`Formula/tessera.rb` builds from source (`depends_on xcode: :build`) and defines
+a `brew services` launch agent. The dev flow below (`.app` bundle) is still used
+for local iteration and log attachment.
+
 ## Why the .app bundle matters (do not `swift run` for real testing)
 
 macOS keys the Accessibility (TCC) grant to an app's **code-signing identity +

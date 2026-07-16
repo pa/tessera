@@ -17,7 +17,20 @@ let package = Package(
         .executableTarget(
             name: "Tessera",
             dependencies: ["TesseraCore"],
-            path: "Sources/Tessera"
+            path: "Sources/Tessera",
+            linkerSettings: [
+                // Embed Info.plist into the binary's __TEXT,__info_plist section
+                // so the bare `swift build` executable is a menu-bar agent with a
+                // bundle identity (LSUIElement + CFBundleIdentifier) — the way
+                // paneru/yabai ship a single binary with no .app wrapper. This is
+                // what lets Homebrew (source build) + TCC work without a bundle.
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Resources/Info.plist",
+                ])
+            ]
         ),
         .testTarget(
             name: "TesseraCoreTests",
