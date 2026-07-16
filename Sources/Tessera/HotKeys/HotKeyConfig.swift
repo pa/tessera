@@ -85,9 +85,9 @@ struct KeyBindingSet: Codable, Equatable {
     /// (⌃⌥⌘⇧) + P / + W. Every chord is rebindable in Settings.
     static let defaults = KeyBindingSet(bindings: assemble(
         base: [.control, .option, .command],
-        baseKeys: [.splitRight: kVK_ANSI_D, .splitDown: kVK_ANSI_S,
+        baseKeys: [.splitRight: kVK_ANSI_R, .splitDown: kVK_ANSI_D,
                    .newTab: kVK_ANSI_T, .nextTab: kVK_ANSI_RightBracket,
-                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_ANSI_R].merging(focusKeys) { a, _ in a }
+                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_Delete].merging(focusKeys) { a, _ in a }
     ))
 
     /// Bind `baseKeys` at `base` modifiers and the shared move keys at
@@ -194,6 +194,7 @@ enum KeySymbols {
 
     private static let special: [Int: String] = [
         kVK_Space: "Space", kVK_Return: "↩", kVK_Tab: "⇥", kVK_Escape: "⎋",
+        kVK_Delete: "⌫", kVK_ForwardDelete: "⌦",
         kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_DownArrow: "↓", kVK_UpArrow: "↑",
         kVK_ANSI_RightBracket: "]", kVK_ANSI_LeftBracket: "[",
         kVK_ANSI_Slash: "/", kVK_ANSI_Backslash: "\\", kVK_ANSI_Semicolon: ";",
