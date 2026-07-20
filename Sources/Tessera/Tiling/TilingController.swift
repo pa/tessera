@@ -368,18 +368,28 @@ final class TilingController {
         // split of the last active pane.
 
         guard let newPane = tree.split(focusedPane, orientation: orientation) else { return }
-        relayout() // focused window shrinks into its half now
+        relayout() // focused window shrinks into its half now (stacked keeps it full)
         applyWorkspaceVisibility() // clean surface behind the palette
 
         pendingPane = newPane
-        guard let paneRect = frames()[newPane] else { return }
-        overlay.show(inAXRect: paneRect)
+        // In a stacked tab the new window joins the stack (monocle), so there's no
+        // half-pane to fill: skip the empty-pane overlay and centre the palette in
+        // the full workspace. Otherwise anchor to the new pane's rect.
+        let stacked = tabs[activeTabIndex].stacked
+        let anchor: CGRect
+        if stacked {
+            anchor = zoomFrame
+        } else {
+            guard let paneRect = frames()[newPane] else { return }
+            anchor = paneRect
+            overlay.show(inAXRect: paneRect)
+        }
 
         palette.onSelect = { [weak self] item in
             if self?.fill(newPane, with: item) == false { self?.cancelPending() }
         }
         palette.onCancel = { [weak self] in self?.cancelPending() }
-        palette.present(anchorRectAX: paneRect, excludingWindowIDs: [])
+        palette.present(anchorRectAX: anchor, excludingWindowIDs: [])
     }
 
     /// Zoom the focused pane to fill the whole workspace (other tiled windows
