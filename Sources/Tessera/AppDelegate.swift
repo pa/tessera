@@ -321,7 +321,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeys.unregisterAll()
         for (command, binding) in set.bindings where !TilingCommand.modeEntry.contains(command) {
             let modifiers = HotKeyManager.Modifiers(rawValue: binding.modifiers)
-            hotKeys.register(keyCode: binding.keyCode, modifiers: modifiers, action: action(for: command))
+            let run = action(for: command)
+            hotKeys.register(keyCode: binding.keyCode, modifiers: modifiers) { [weak self] in
+                guard self?.isPaused != true else { return } // no tiling while paused
+                run()
+            }
         }
         // Mode-entry chords are interpreted by the event tap, not the hot-key
         // manager — hand them to the engine.

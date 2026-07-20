@@ -127,9 +127,14 @@ final class ModeEngine {
     /// modal layer. When disabling, any active mode is exited first so keys pass
     /// straight through to apps.
     func setActive(_ active: Bool) {
+        suspended = !active
         if !active { setMode(.normal) }
         if let tap { CGEvent.tapEnable(tap: tap, enable: active) }
     }
+
+    /// When suspended, every key passes straight through (belt-and-suspenders in
+    /// case the tap wasn't disabled — e.g. re-armed by the system).
+    private var suspended = false
 
     // MARK: - Event handling
 
@@ -139,9 +144,11 @@ final class ModeEngine {
         // The system disables a tap that blocks too long or on user input; just
         // re-enable and pass the event on.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            // Don't re-arm while paused — the tap is meant to stay off.
+            if !suspended, let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return false
         }
+        if suspended { return false }        // paused → let every key through
         guard type == .keyDown else { return false }
 
         let chord = Chord(event: event)
