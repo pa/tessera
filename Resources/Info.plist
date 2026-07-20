@@ -10,6 +10,8 @@
     <string>pramodh.ayyappan.tessera</string>
     <key>CFBundleExecutable</key>
     <string>Tessera</string>
+    <key>CFBundleIconFile</key>
+    <string>Tessera</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

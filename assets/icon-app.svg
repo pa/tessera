@@ -1,0 +1,20 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="100" y1="100" x2="924" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00ADB5"/>
+      <stop offset="1" stop-color="#0A8E95"/>
+    </linearGradient>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#0b3a3d" flood-opacity="0.30"/>
+    </filter>
+  </defs>
+
+  <!-- macOS squircle: 824x824 centred, ~22% corner radius, with margin -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+
+  <!-- ▚ (U+259A): narrow upper-left + lower-right quadrants, touching at centre -->
+  <g fill="#FFFFFF" filter="url(#s)">
+    <path d="M 356 236 L 512 236 L 512 512 L 300 512 L 300 292 A 56 56 0 0 1 356 236 Z"/>
+    <path d="M 512 512 L 724 512 L 724 732 A 56 56 0 0 1 668 788 L 512 788 L 512 512 Z"/>
+  </g>
+</svg>

@@ -38,6 +38,8 @@ mkdir -p "$APP/Contents/Resources"
 
 cp "$BIN_PATH/Tessera" "$APP/Contents/MacOS/Tessera"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+# App icon (shown in Finder / Get Info — Tessera has no Dock icon as an agent).
+[ -f "$ROOT/Resources/Tessera.icns" ] && cp "$ROOT/Resources/Tessera.icns" "$APP/Contents/Resources/Tessera.icns"
 
 echo "==> codesign (identity: $IDENTITY)"
 # The self-signed identity lives in a dedicated keychain that can re-lock
