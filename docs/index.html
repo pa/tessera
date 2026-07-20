@@ -12,10 +12,12 @@
     --brand:#00ADB5; --brand2:#0A8E95;
     --bg:#EEEEEE; --fg:#222831; --muted:#5a616b; --card:#ffffff;
     --border:#dcdde1; --code-bg:#e4e5e8; --accent:#00ADB5;
+    --kbd-bg:#ffffff; --kbd-border:#bfe0e2; --kbd-fg:#0a7d82;
   }
   @media (prefers-color-scheme: dark){
     :root{ --bg:#222831; --fg:#EEEEEE; --muted:#9aa1ab; --card:#393E46;
-           --border:#454b55; --code-bg:#2b313a; }
+           --border:#454b55; --code-bg:#2b313a;
+           --kbd-bg:#2f3742; --kbd-border:#2e5f63; --kbd-fg:#3fd0d8; }
   }
   /* Theme follows the OS automatically via prefers-color-scheme above. */
 
@@ -31,9 +33,9 @@
   .wrap{ max-width:920px; margin:0 auto; padding:0 24px; }
   code,kbd{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
   kbd{
-    display:inline-block; padding:.12em .5em; border:1px solid var(--border);
-    border-bottom-width:2px; border-radius:7px; background:var(--code-bg);
-    font-size:.82em; white-space:nowrap;
+    display:inline-block; padding:.16em .55em; border:1px solid var(--kbd-border);
+    border-bottom-width:2px; border-radius:7px; background:var(--kbd-bg);
+    color:var(--kbd-fg); font-weight:700; font-size:.85em; white-space:nowrap;
   }
 
   /* Hero */
