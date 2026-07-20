@@ -26,15 +26,6 @@ final class ModeEngine {
             }
         }
 
-        /// Hint text for the HUD, or nil in normal mode.
-        var hudText: String? {
-            switch self {
-            case .normal: return nil
-            case .pane: return "PANE   r/d split · hjkl focus/move · ⇧hjkl swap · n/p cycle · f full · s stack · w float · b balance · c change · ⏎/esc done"
-            case .tab: return "TAB   n new · h/l prev/next · ⇧h/⇧l move window to tab · ⏎/esc done"
-            case .resize: return "RESIZE   h narrower · l wider · k taller · j shorter · ⏎/esc done"
-            }
-        }
     }
 
     /// A key + relevant modifiers, comparable against a tap event.
@@ -169,7 +160,6 @@ final class ModeEngine {
             case kVK_ANSI_C: exitAndRun { $0.changeFocusedPaneWindow() } // opens palette
             case kVK_ANSI_F: tiling.toggleFullscreen()
             case kVK_ANSI_W: tiling.toggleFloat()
-            case kVK_ANSI_B: tiling.balanceSizes()
             case kVK_ANSI_S: tiling.toggleStacked()
             case kVK_ANSI_N: tiling.focusNextWindow()
             case kVK_ANSI_P: tiling.focusPreviousWindow()

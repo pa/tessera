@@ -442,7 +442,9 @@ final class TilingController {
     /// A pane (or floating window) row for the workspace navigator.
     struct PaneEntry {
         let title: String
+        let pid: pid_t                 // owning app, for the app icon
         let isFocused: Bool
+        let isFloating: Bool
         let paneID: PaneID?            // set for tiled panes
         let floatingWindowID: CGWindowID? // set for floating windows
     }
@@ -461,13 +463,17 @@ final class TilingController {
                 guard let ref = tab.occupants[pane] else { continue }
                 entries.append(PaneEntry(
                     title: ref.window.title ?? "Window",
+                    pid: ref.pid,
                     isFocused: index == activeTabIndex && pane == tab.focusedPane,
+                    isFloating: false,
                     paneID: pane, floatingWindowID: nil))
             }
             for floater in tab.floating {
                 entries.append(PaneEntry(
                     title: floater.window.title ?? "Floating window",
+                    pid: floater.pid,
                     isFocused: false,
+                    isFloating: true,
                     paneID: nil, floatingWindowID: floater.window.windowID))
             }
             return TabEntry(index: index, isActive: index == activeTabIndex, panes: entries)
@@ -996,6 +1002,9 @@ final class TilingController {
 
     /// Number of tiled windows in the active tab (0 or 1 means nothing to resize).
     var activePaneCount: Int { occupants.count }
+
+    /// Number of floating windows in the active tab.
+    var activeFloatingCount: Int { tabs[activeTabIndex].floating.count }
 
     /// Open a fresh tab: hide the current tab's apps, then pop the palette to
     /// pick the window that fills the new tab. Cancelling returns to the tab you

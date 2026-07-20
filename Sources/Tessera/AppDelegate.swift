@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.toolTip = "Tessera"
         tiling.onWorkspaceChange = { [weak self] in self?.refreshStatusIndicator() }
-        statusItem.button?.title = tabIndicator()
+        statusItem.button?.title = statusTitle(for: .normal)
 
         // Nudge the system Accessibility prompt on first launch. The grant lands
         // asynchronously; the menu reflects the live state each time it opens.
@@ -159,9 +159,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openNavigator() {
         let roots = tiling.workspaceSnapshot().map { tab -> WorkspaceNavigatorController.Node in
-            let children = tab.panes.map { pane in
-                WorkspaceNavigatorController.Node(
-                    title: (pane.isFocused ? "▸ " : "") + pane.title,
+            let children = tab.panes.map { pane -> WorkspaceNavigatorController.Node in
+                let app = NSRunningApplication(processIdentifier: pane.pid)
+                let subtitle = pane.isFloating ? "Floating · \(app?.localizedName ?? "")"
+                                               : (app?.localizedName ?? "")
+                return WorkspaceNavigatorController.Node(
+                    title: pane.title,
+                    subtitle: subtitle,
+                    icon: app?.icon,
+                    isGroup: false,
                     emphasized: pane.isFocused,
                     children: []
                 ) { [weak self] in
@@ -172,8 +178,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             }
+            let count = tab.panes.count
+            // A numbered circle doubles as the tab's number; filled when current.
+            let n = tab.index + 1
+            let symbol = n <= 50 ? "\(n).circle\(tab.isActive ? ".fill" : "")" : "rectangle.stack"
             return WorkspaceNavigatorController.Node(
-                title: "Tab \(tab.index + 1)" + (tab.isActive ? "  (current)" : ""),
+                title: "Tab \(n)",
+                subtitle: "\(count) window\(count == 1 ? "" : "s")",
+                icon: NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+                isGroup: true,
                 emphasized: tab.isActive,
                 children: children
             ) { [weak self] in self?.tiling.focusTab(tab.index) }
@@ -187,27 +200,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// In normal mode the glyph shows the current tab position (▚ 2/3); a mode
     /// temporarily overrides it with its own glyph (▚ P/T/R).
     private func applyMode(_ mode: ModeEngine.Mode) {
-        statusItem.button?.title = (mode == .normal) ? tabIndicator() : mode.glyph
-        if mode == .resize && tiling.activePaneCount <= 1 {
-            modeHUD.show("RESIZE   single pane — nothing to resize · ⏎/esc done")
-        } else if let hint = mode.hudText {
+        statusItem.button?.title = statusTitle(for: mode)
+        if let hint = hudHint(for: mode) {
             modeHUD.show(hint)
         } else {
             modeHUD.hide()
         }
     }
 
-    /// Refresh the menu-bar glyph after a tab change (only while in normal mode;
-    /// a mode's own glyph takes precedence).
-    private func refreshStatusIndicator() {
-        if modeEngine.mode == .normal {
-            statusItem.button?.title = tabIndicator()
+    /// Build the HUD hint for `mode`, showing only the keys that apply to the
+    /// current layout — e.g. no focus/swap/stack keys with a single pane, no
+    /// prev/next/move-to-tab with a single tab. Keeps the strip honest so the
+    /// user isn't offered actions that would do nothing.
+    private func hudHint(for mode: ModeEngine.Mode) -> String? {
+        let panes = tiling.activePaneCount
+        let floating = tiling.activeFloatingCount
+        let tabCount = tiling.tabSummary.count
+        let windows = panes + floating
+
+        switch mode {
+        case .normal:
+            return nil
+        case .pane:
+            var seg = ["r/d split"]
+            if panes > 1 { seg.append("hjkl focus"); seg.append("⇧hjkl swap") }
+            else if floating > 0 { seg.append("hjkl move") }
+            if windows > 1 { seg.append("n/p cycle") }
+            if windows >= 1 { seg.append("f full"); seg.append("w float") }
+            if panes > 1 { seg.append("s stack") }
+            if windows >= 1 { seg.append("c change") }
+            seg.append("⏎/esc done")
+            return "PANE   " + seg.joined(separator: " · ")
+        case .tab:
+            var seg = ["n new"]
+            if tabCount > 1 { seg.append("h/l prev/next"); seg.append("⇧h/⇧l move to tab") }
+            seg.append("⏎/esc done")
+            return "TAB   " + seg.joined(separator: " · ")
+        case .resize:
+            if panes <= 1 { return "RESIZE   single pane — nothing to resize · ⏎/esc done" }
+            return "RESIZE   h narrower · l wider · k taller · j shorter · ⏎/esc done"
         }
     }
 
-    private func tabIndicator() -> String {
+    /// Refresh the pill after a workspace change so a tab switch is reflected in
+    /// any mode (the tab position is always shown). While in a mode, also refresh
+    /// the HUD so its hints track layout changes made without leaving the mode.
+    private func refreshStatusIndicator() {
+        statusItem.button?.title = statusTitle(for: modeEngine.mode)
+        if modeEngine.mode != .normal, let hint = hudHint(for: modeEngine.mode) {
+            modeHUD.show(hint)
+        }
+    }
+
+    /// The menu-bar pill text: the mode glyph plus the current tab position, so
+    /// switching tabs is visible in the pill regardless of mode (▚ 2/3, ▚ T 2/3…).
+    private func statusTitle(for mode: ModeEngine.Mode) -> String {
         let tabs = tiling.tabSummary
-        return "▚ \(tabs.index + 1)/\(tabs.count)"
+        return "\(mode.glyph) \(tabs.index + 1)/\(tabs.count)"
     }
 
     /// Register every global shortcut from the current binding set. Called at
