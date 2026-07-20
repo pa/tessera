@@ -328,3 +328,11 @@ its `CGWindowID` for stable identity — the same symbol yabai/AeroSpace/Reef us
   is a later milestone.
 - Swift 6 strict concurrency: `kAXTrustedCheckOptionPrompt` is a non-Sendable
   global — use the literal `"AXTrustedCheckOptionPrompt"` key instead.
+- **`AXEnhancedUserInterface` breaks AX resize.** Chromium/Electron apps (Brave,
+  Chrome, VS Code, Slack) set this undocumented **app-level** attribute —
+  especially once an accessibility client attaches — and while it's `true`, AX
+  position/size writes are animated/deferred and **don't stick**, so windows
+  resist tiling and read back oversized. `AXWindow.setFrame` disables it around
+  the writes and restores it after (same trick as yabai / Rectangle / AeroSpace;
+  needs no SIP). Without this, Brave/VS Code overflow their pane instead of
+  fitting. Refs: yabai commit 3fe4c77, Rectangle PR #285.

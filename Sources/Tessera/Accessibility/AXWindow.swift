@@ -140,14 +140,47 @@ struct AXWindow {
     /// window that's being grown doesn't briefly clip off-screen. Returns the
     /// resulting frame after the app has had its say (which may differ from the
     /// request if the app enforces a minimum size).
+    ///
+    /// Wrapped in an `AXEnhancedUserInterface` toggle: apps built on
+    /// Chromium/Electron (Brave, Chrome, VS Code, Slack…) set that app-level
+    /// attribute — especially once an accessibility client attaches — and while
+    /// it's on, AX geometry writes are **animated/deferred and don't stick**, so
+    /// the window resists tiling. Disabling it around the writes makes the frame
+    /// apply synchronously, then we restore it. Same undocumented trick as
+    /// yabai / Rectangle / AeroSpace; needs no SIP.
     @discardableResult
     func setFrame(_ rect: CGRect) -> CGRect? {
+        let app = appElement()
+        var restoreEnhancedUI = false
+        if let app, boolAttribute(app, "AXEnhancedUserInterface") == true {
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+            restoreEnhancedUI = true
+        }
+        defer {
+            if restoreEnhancedUI, let app {
+                AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            }
+        }
         setPosition(rect.origin)
         setSize(rect.size)
         // Re-set position: growing a window can shift its origin, so a second
         // position write pins the top-left corner where we asked for it.
         setPosition(rect.origin)
         return frame
+    }
+
+    /// The owning application's AX element, for app-level attributes.
+    private func appElement() -> AXUIElement? {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success, pid > 0 else { return nil }
+        return AXUIElementCreateApplication(pid)
+    }
+
+    private func boolAttribute(_ element: AXUIElement, _ attribute: String) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success
+        else { return nil }
+        return value as? Bool
     }
 
     private func copyValue<T>(
