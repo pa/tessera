@@ -213,6 +213,13 @@ All six brief milestones are complete.
   close button). Browsers spawn many transient `AXWindow`s for autofill/menus/
   extension popups (reporting `AXUnknown` etc.); requiring a standard window
   keeps those popovers from being adopted and yanked into panes.
+- **Pause / Resume** (menu: "Pause Tessera") — temporarily disable window
+  management: `TilingController.suspend()` stops the maintenance loop and hands
+  every window back to macOS (unhide apps, un-park), `ModeEngine.setActive(false)`
+  disables the event tap so mode chords fall through, and global hotkeys are
+  unregistered. The layout is kept in memory; Resume re-applies it and restarts
+  everything. The pill shows `▚ ⏸`; event-driven adopts (`handleWindowCreated`,
+  `revealTab`) no-op while suspended.
 - **Change Pane Window** — re-pick the focused pane's window via the palette.
 - **Full-screen (zoom)** — the focused pane fills the workspace; others park
   off-screen. Toggles; auto-clears on tab switch / reset / window close. Distinct

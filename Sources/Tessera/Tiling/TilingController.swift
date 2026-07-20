@@ -183,6 +183,31 @@ final class TilingController {
         scheduleTick(after: activeInterval)
     }
 
+    /// True while paused — window management is suspended (no enforcement,
+    /// auto-tile, or activation-follow), and windows are handed back to macOS.
+    private(set) var isSuspended = false
+
+    /// Pause window management: stop the maintenance loop and bring every managed
+    /// window back on-screen (unhide apps, un-park), so macOS handles them
+    /// normally. The tab/pane layout is kept in memory for `resume()`.
+    func suspend() {
+        guard !isSuspended else { return }
+        isSuspended = true
+        enforcementTimer?.invalidate()
+        enforcementTimer = nil
+        restoreAllWindowsOnScreen()
+    }
+
+    /// Resume window management: re-apply the current layout and restart the loop.
+    func resume() {
+        guard isSuspended else { return }
+        isSuspended = false
+        relayout()
+        applyWorkspaceVisibility()
+        if let ref = occupants[focusedPane] { focus(ref) }
+        startEnforcing()
+    }
+
     private func scheduleTick(after interval: TimeInterval) {
         enforcementTimer?.invalidate()
         enforcementTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
@@ -209,7 +234,7 @@ final class TilingController {
     /// the window is a new, tileable, unmanaged one. Driven by `WindowObserver`
     /// (`kAXWindowCreated`) so it happens the instant the window appears.
     func handleWindowCreated(pid: pid_t, window: AXWindow) {
-        guard autoTileEnabled, pendingPane == nil,
+        guard !isSuspended, autoTileEnabled, pendingPane == nil,
               window.isTileable, let id = window.windowID,
               !knownWindowIDs.contains(id), !occupiedWindowIDs().contains(id) else { return }
         knownWindowIDs.insert(id)
@@ -485,7 +510,7 @@ final class TilingController {
     /// tab the user is currently looking at. No-op if the window is unmanaged or
     /// already in the active tab (that just tracks focus).
     func revealTab(forActivatedApp pid: pid_t) {
-        guard pendingPane == nil else { return }
+        guard !isSuspended, pendingPane == nil else { return }
         // Activation notifications are delivered async, and hiding a tab's apps
         // during a switch briefly activates others. Only follow the app that is
         // *actually* frontmost now, so those transient activations don't thrash tabs.

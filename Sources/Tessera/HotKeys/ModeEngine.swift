@@ -123,6 +123,14 @@ final class ModeEngine {
         return true
     }
 
+    /// Enable/disable the event tap without tearing it down — used to pause the
+    /// modal layer. When disabling, any active mode is exited first so keys pass
+    /// straight through to apps.
+    func setActive(_ active: Bool) {
+        if !active { setMode(.normal) }
+        if let tap { CGEvent.tapEnable(tap: tap, enable: active) }
+    }
+
     // MARK: - Event handling
 
     /// Returns true if the event should be swallowed (consumed), false to pass

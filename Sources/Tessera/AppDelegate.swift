@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotKeys = HotKeyManager()
     private let windowObserver = WindowObserver()
     private let modeHUD = ModeHUD()
+    private var isPaused = false
     private lazy var modeEngine: ModeEngine = {
         let engine = ModeEngine(tiling: tiling)
         engine.onModeChange = { [weak self] mode in self?.applyMode(mode) }
@@ -124,18 +125,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here (everything else lives on hotkeys / modes). The chord in each
         // title reflects the live binding set; the shortcut itself fires globally
         // via HotKeyManager, so the items carry no key-equivalent.
+        let active = trusted && !isPaused
         let palette = NSMenuItem(title: "Command Palette…\(chordSuffix(.palette))", action: #selector(openCommandPalette), keyEquivalent: "")
         palette.target = self
-        palette.isEnabled = trusted
+        palette.isEnabled = active
         menu.addItem(palette)
         let navigatorItem = NSMenuItem(title: "Workspace Navigator…\(chordSuffix(.navigator))", action: #selector(openNavigator), keyEquivalent: "")
         navigatorItem.target = self
-        navigatorItem.isEnabled = trusted
+        navigatorItem.isEnabled = active
         menu.addItem(navigatorItem)
         let organize = NSMenuItem(title: "Organize Windows by App", action: #selector(organizeByApp), keyEquivalent: "")
         organize.target = self
-        organize.isEnabled = trusted
+        organize.isEnabled = active
         menu.addItem(organize)
+
+        menu.addItem(.separator())
+        // Pause hands windows back to macOS and lets shortcuts fall through.
+        let pause = NSMenuItem(title: isPaused ? "Resume Tessera" : "Pause Tessera",
+                               action: #selector(togglePause), keyEquivalent: "")
+        pause.target = self
+        pause.isEnabled = trusted
+        menu.addItem(pause)
 
         menu.addItem(.separator())
         // ⌘, opens Settings when Tessera is active (e.g. this menu / a Tessera
@@ -201,6 +211,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() { settingsWindow.show() }
     @objc private func organizeByApp() { tiling.adoptAllWindowsByApp() }
+
+    /// Pause/resume window management: stop tiling, hand windows back to macOS,
+    /// and let global shortcuts / modes fall through — or restore all of it.
+    @objc private func togglePause() {
+        isPaused.toggle()
+        if isPaused {
+            hotKeys.unregisterAll()
+            modeEngine.setActive(false)
+            tiling.suspend()
+        } else {
+            applyBindings(bindingSet)   // re-register global hotkeys + mode chords
+            modeEngine.setActive(true)
+            tiling.resume()
+        }
+        refreshStatusIndicator()
+    }
 
     /// Reflect the active input mode in the menu-bar glyph and the HUD hint bar.
     /// In normal mode the glyph shows the current tab position (▚ 2/3); a mode
@@ -283,6 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The menu-bar pill text: the mode glyph plus the current tab position, so
     /// switching tabs is visible in the pill regardless of mode (▚ 2/3, ▚ T 2/3…).
     private func statusTitle(for mode: ModeEngine.Mode) -> String {
+        if isPaused { return "▚ ⏸" }
         let tabs = tiling.tabSummary
         return "\(mode.glyph) \(tabs.index + 1)/\(tabs.count)"
     }
