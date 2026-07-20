@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — tiling window manager for macOS</title>
+<meta name="description" content="A keyboard-driven tiling window manager for macOS. Tabs, splits, panes, a command palette, and modal keys for any app.">
+<link rel="icon" href="favicon.png">
+<style>
+  :root{
+    --brand:#6D5EF6; --brand2:#8B5CF6;
+    --bg:#ffffff; --fg:#1c1b22; --muted:#6b6b78; --card:#f6f5fb;
+    --border:#e6e4f0; --code-bg:#f2f1f9; --accent:#6D5EF6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f0e13; --fg:#ece9f5; --muted:#9c98ab; --card:#18161f;
+           --border:#262233; --code-bg:#1a1824; }
+  }
+  :root[data-theme="dark"]{ --bg:#0f0e13; --fg:#ece9f5; --muted:#9c98ab; --card:#18161f; --border:#262233; --code-bg:#1a1824; }
+  :root[data-theme="light"]{ --bg:#ffffff; --fg:#1c1b22; --muted:#6b6b78; --card:#f6f5fb; --border:#e6e4f0; --code-bg:#f2f1f9; }
+
+  *{ box-sizing:border-box; }
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  a{ color:var(--accent); text-decoration:none; }
+  a:hover{ text-decoration:underline; }
+  .wrap{ max-width:920px; margin:0 auto; padding:0 24px; }
+  code,kbd{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  kbd{
+    display:inline-block; padding:.12em .5em; border:1px solid var(--border);
+    border-bottom-width:2px; border-radius:7px; background:var(--code-bg);
+    font-size:.82em; white-space:nowrap;
+  }
+
+  /* Hero */
+  header{ text-align:center; padding:72px 0 40px; }
+  header img{ width:112px; height:112px; border-radius:26px;
+    box-shadow:0 14px 40px rgba(79,70,180,.35); }
+  h1{ font-size:44px; margin:20px 0 6px; letter-spacing:-.02em; }
+  .tagline{ font-size:19px; color:var(--muted); margin:0 auto; max-width:620px; }
+  .badges{ margin-top:18px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+  .badges span{ font-size:12.5px; color:var(--muted); border:1px solid var(--border);
+    border-radius:999px; padding:4px 11px; }
+
+  /* Install */
+  .install{ background:linear-gradient(135deg,var(--brand),var(--brand2));
+    border-radius:18px; padding:26px 26px; margin:8px 0 40px; color:#fff; }
+  .install h2{ margin:0 0 12px; color:#fff; font-size:17px; }
+  .install pre{ margin:0; background:rgba(0,0,0,.22); border-radius:12px;
+    padding:16px 18px; overflow-x:auto; }
+  .install code{ color:#fff; font-size:13.5px; line-height:1.9; }
+  .install .note{ font-size:13px; opacity:.9; margin:14px 0 0; }
+
+  h2{ font-size:24px; margin:44px 0 14px; letter-spacing:-.01em; }
+  h3{ font-size:15px; margin:26px 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  section{ border-top:1px solid var(--border); padding-top:8px; }
+
+  /* Feature grid */
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin:6px 0; }
+  .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px 18px; }
+  .card h4{ margin:0 0 5px; font-size:15.5px; }
+  .card p{ margin:0; color:var(--muted); font-size:14px; }
+
+  /* Tables */
+  .tablewrap{ overflow-x:auto; }
+  table{ border-collapse:collapse; width:100%; font-size:14.5px; margin:6px 0 4px; }
+  th,td{ text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th{ color:var(--muted); font-weight:600; font-size:12.5px; text-transform:uppercase; letter-spacing:.04em; }
+  td:first-child{ white-space:nowrap; }
+
+  footer{ text-align:center; color:var(--muted); font-size:13.5px; padding:44px 0 60px; border-top:1px solid var(--border); margin-top:44px; }
+  .glyph{ color:var(--accent); font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <img src="icon.svg" alt="Tessera icon">
+    <h1>Tessera</h1>
+    <p class="tagline">A keyboard-driven tiling window manager for macOS — tmux/Zellij workflows for <em>any</em> app.</p>
+    <div class="badges">
+      <span>macOS 14+</span><span>Homebrew</span><span>No Apple Developer ID</span><span>MIT</span>
+    </div>
+  </header>
+
+  <div class="install">
+    <h2>Install</h2>
+    <pre><code>brew tap pa/tessera https://github.com/pa/tessera
+brew install --HEAD tessera
+brew services start tessera</code></pre>
+    <p class="note">A single Swift binary built from source — no notarization, no
+      quarantine. Then grant <strong>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security → Accessibility → Tessera</strong>.
+      The grant survives every <code>brew upgrade</code>. Keep <strong>Stage Manager off</strong>.</p>
+  </div>
+
+  <section>
+    <h2>What it does</h2>
+    <p>Tessera is a menu-bar agent (look for the <span class="glyph">▚</span> glyph — the
+      pill also shows your tab position and active mode). It puppets other apps'
+      windows through the macOS Accessibility API to give you a terminal-multiplexer
+      workflow across your whole desktop.</p>
+    <div class="grid">
+      <div class="card"><h4>BSP tiling</h4><p>Split any focused window right or down, with configurable padding.</p></div>
+      <div class="card"><h4>Virtual tabs</h4><p>Independent workspaces; a tab can stack windows in monocle mode.</p></div>
+      <div class="card"><h4>Modal keys</h4><p>Zellij-style Pane / Tab / Resize modes with a live, context-aware hint bar.</p></div>
+      <div class="card"><h4>Command palette</h4><p>Fuzzy-find and launch apps or focus any window.</p></div>
+      <div class="card"><h4>Workspace navigator</h4><p>A searchable tree of tabs, panes, and windows with app icons.</p></div>
+      <div class="card"><h4>Floating &amp; zoom</h4><p>Pop a window out to float, or zoom a pane to fill the screen.</p></div>
+      <div class="card"><h4>Organize by app</h4><p>One command lays every open window out as one tab per app.</p></div>
+      <div class="card"><h4>Session restore</h4><p>Your layout comes back after a restart — windows re-slotted, no relaunch.</p></div>
+      <div class="card"><h4>Stubborn apps</h4><p>Toggles <code>AXEnhancedUserInterface</code> so Chromium/Electron apps actually tile.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Keyboard reference</h2>
+    <p>The default prefix is <kbd>⌃⌥⌘</kbd> (Control-Option-Command). Everything is
+      rebindable in <strong>Settings</strong> (<kbd>⌘,</kbd> or the menu bar).</p>
+
+    <h3>Global shortcuts</h3>
+    <div class="tablewrap"><table>
+      <tr><th>Shortcut</th><th>Action</th></tr>
+      <tr><td><kbd>⌃⌥⌘R</kbd> / <kbd>⌃⌥⌘D</kbd></td><td>Split focused window right / down</td></tr>
+      <tr><td><kbd>⌃⌥⌘</kbd> <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Focus left / down / up / right</td></tr>
+      <tr><td><kbd>⌃⌥⌘⇧</kbd> <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Move window between panes</td></tr>
+      <tr><td><kbd>⌃⌥⌘T</kbd> · <kbd>⌃⌥⌘]</kbd> / <kbd>⌃⌥⌘[</kbd></td><td>New tab · next / previous tab</td></tr>
+      <tr><td><kbd>⌃⌥⌘⇧P</kbd></td><td>Command palette</td></tr>
+      <tr><td><kbd>⌃⌥⌘⇧W</kbd></td><td>Workspace navigator</td></tr>
+      <tr><td><kbd>⌃⌥⌘⌫</kbd></td><td>Reset tiling (un-manage everything)</td></tr>
+    </table></div>
+
+    <h3>Pane mode — <kbd>⌃P</kbd></h3>
+    <div class="tablewrap"><table>
+      <tr><th>Key</th><th>Action</th></tr>
+      <tr><td><kbd>r</kbd> / <kbd>d</kbd></td><td>Split right / down</td></tr>
+      <tr><td><kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd></td><td>Focus pane (or move a floating window)</td></tr>
+      <tr><td><kbd>⇧</kbd> + <kbd>hjkl</kbd></td><td>Swap window with neighbour</td></tr>
+      <tr><td><kbd>n</kbd> / <kbd>p</kbd></td><td>Cycle focus through all windows</td></tr>
+      <tr><td><kbd>f</kbd></td><td>Full-screen (zoom) the pane</td></tr>
+      <tr><td><kbd>w</kbd></td><td>Attach / float / re-tile the focused window</td></tr>
+      <tr><td><kbd>s</kbd></td><td>Toggle stacked (monocle) layout</td></tr>
+      <tr><td><kbd>c</kbd></td><td>Change the pane's window (palette)</td></tr>
+    </table></div>
+
+    <h3>Tab mode — <kbd>⌃T</kbd></h3>
+    <div class="tablewrap"><table>
+      <tr><th>Key</th><th>Action</th></tr>
+      <tr><td><kbd>n</kbd></td><td>New tab</td></tr>
+      <tr><td><kbd>h</kbd> / <kbd>l</kbd></td><td>Previous / next tab</td></tr>
+      <tr><td><kbd>⇧h</kbd> / <kbd>⇧l</kbd></td><td>Move window to previous / next tab</td></tr>
+      <tr><td><kbd>m</kbd> then digits, <kbd>⏎</kbd></td><td>Move window to tab # (a number past the end creates it)</td></tr>
+    </table></div>
+
+    <h3>Resize mode — <kbd>⌃R</kbd></h3>
+    <div class="tablewrap"><table>
+      <tr><th>Key</th><th>Action</th></tr>
+      <tr><td><kbd>h</kbd> / <kbd>l</kbd></td><td>Narrower / wider</td></tr>
+      <tr><td><kbd>k</kbd> / <kbd>j</kbd></td><td>Taller / shorter</td></tr>
+    </table></div>
+    <p style="color:var(--muted);font-size:14px">In any mode, the menu-bar hint bar shows only the keys that apply right now. <kbd>⏎</kbd>/<kbd>esc</kbd> exits a mode.</p>
+  </section>
+
+  <section>
+    <h2>Settings</h2>
+    <p>Open with <kbd>⌘,</kbd> (when Tessera is active) or the menu bar:</p>
+    <ul>
+      <li><strong>General</strong> — tile padding (as a % of screen width), app version.</li>
+      <li><strong>Hotkeys</strong> — rebind any command; <em>Reset to Defaults</em>.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p><span class="glyph">▚</span> Tessera — built with Swift + AppKit + the Accessibility API.<br>
+    <a href="https://github.com/pa/tessera">Source on GitHub</a> · MIT License</p>
+  </footer>
+
+</div>
+</body>
+</html>
