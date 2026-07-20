@@ -5,19 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tessera — tiling window manager for macOS</title>
 <meta name="description" content="A keyboard-driven tiling window manager for macOS. Tabs, splits, panes, a command palette, and modal keys for any app.">
-<link rel="icon" href="favicon.png">
+<link rel="icon" href="icon.svg">
 <style>
   :root{
-    --brand:#6D5EF6; --brand2:#8B5CF6;
-    --bg:#ffffff; --fg:#1c1b22; --muted:#6b6b78; --card:#f6f5fb;
-    --border:#e6e4f0; --code-bg:#f2f1f9; --accent:#6D5EF6;
+    /* Palette: #222831 #393E46 #00ADB5 #EEEEEE */
+    --brand:#00ADB5; --brand2:#0A8E95;
+    --bg:#EEEEEE; --fg:#222831; --muted:#5a616b; --card:#ffffff;
+    --border:#dcdde1; --code-bg:#e4e5e8; --accent:#00ADB5;
   }
   @media (prefers-color-scheme: dark){
-    :root{ --bg:#0f0e13; --fg:#ece9f5; --muted:#9c98ab; --card:#18161f;
-           --border:#262233; --code-bg:#1a1824; }
+    :root{ --bg:#222831; --fg:#EEEEEE; --muted:#9aa1ab; --card:#393E46;
+           --border:#454b55; --code-bg:#2b313a; }
   }
-  :root[data-theme="dark"]{ --bg:#0f0e13; --fg:#ece9f5; --muted:#9c98ab; --card:#18161f; --border:#262233; --code-bg:#1a1824; }
-  :root[data-theme="light"]{ --bg:#ffffff; --fg:#1c1b22; --muted:#6b6b78; --card:#f6f5fb; --border:#e6e4f0; --code-bg:#f2f1f9; }
+  /* Theme follows the OS automatically via prefers-color-scheme above. */
 
   *{ box-sizing:border-box; }
   html{ -webkit-text-size-adjust:100%; }
@@ -37,8 +37,8 @@
 
   /* Hero */
   header{ text-align:center; padding:72px 0 40px; }
-  header img{ width:112px; height:112px; border-radius:26px;
-    box-shadow:0 14px 40px rgba(79,70,180,.35); }
+  header img{ width:92px; height:92px; }
+  .muted{ color:var(--muted); font-size:14px; }
   h1{ font-size:44px; margin:20px 0 6px; letter-spacing:-.02em; }
   .tagline{ font-size:19px; color:var(--muted); margin:0 auto; max-width:620px; }
   .badges{ margin-top:18px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
@@ -121,56 +121,78 @@ brew services start tessera</code></pre>
     <p>The default prefix is <kbd>⌃⌥⌘</kbd> (Control-Option-Command). Everything is
       rebindable in <strong>Settings</strong> (<kbd>⌘,</kbd> or the menu bar).</p>
 
-    <h3>Global shortcuts</h3>
-    <div class="tablewrap"><table>
-      <tr><th>Shortcut</th><th>Action</th></tr>
-      <tr><td><kbd>⌃⌥⌘R</kbd> / <kbd>⌃⌥⌘D</kbd></td><td>Split focused window right / down</td></tr>
-      <tr><td><kbd>⌃⌥⌘</kbd> <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Focus left / down / up / right</td></tr>
-      <tr><td><kbd>⌃⌥⌘⇧</kbd> <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Move window between panes</td></tr>
-      <tr><td><kbd>⌃⌥⌘T</kbd> · <kbd>⌃⌥⌘]</kbd> / <kbd>⌃⌥⌘[</kbd></td><td>New tab · next / previous tab</td></tr>
-      <tr><td><kbd>⌃⌥⌘⇧P</kbd></td><td>Command palette</td></tr>
-      <tr><td><kbd>⌃⌥⌘⇧W</kbd></td><td>Workspace navigator</td></tr>
-      <tr><td><kbd>⌃⌥⌘⌫</kbd></td><td>Reset tiling (un-manage everything)</td></tr>
-    </table></div>
-
-    <h3>Pane mode — <kbd>⌃P</kbd></h3>
-    <div class="tablewrap"><table>
-      <tr><th>Key</th><th>Action</th></tr>
-      <tr><td><kbd>r</kbd> / <kbd>d</kbd></td><td>Split right / down</td></tr>
-      <tr><td><kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd></td><td>Focus pane (or move a floating window)</td></tr>
-      <tr><td><kbd>⇧</kbd> + <kbd>hjkl</kbd></td><td>Swap window with neighbour</td></tr>
-      <tr><td><kbd>n</kbd> / <kbd>p</kbd></td><td>Cycle focus through all windows</td></tr>
-      <tr><td><kbd>f</kbd></td><td>Full-screen (zoom) the pane</td></tr>
-      <tr><td><kbd>w</kbd></td><td>Attach / float / re-tile the focused window</td></tr>
-      <tr><td><kbd>s</kbd></td><td>Toggle stacked (monocle) layout</td></tr>
-      <tr><td><kbd>c</kbd></td><td>Change the pane's window (palette)</td></tr>
-    </table></div>
-
-    <h3>Tab mode — <kbd>⌃T</kbd></h3>
-    <div class="tablewrap"><table>
-      <tr><th>Key</th><th>Action</th></tr>
-      <tr><td><kbd>n</kbd></td><td>New tab</td></tr>
-      <tr><td><kbd>h</kbd> / <kbd>l</kbd></td><td>Previous / next tab</td></tr>
-      <tr><td><kbd>⇧h</kbd> / <kbd>⇧l</kbd></td><td>Move window to previous / next tab</td></tr>
-      <tr><td><kbd>m</kbd> then digits, <kbd>⏎</kbd></td><td>Move window to tab # (a number past the end creates it)</td></tr>
-    </table></div>
-
-    <h3>Resize mode — <kbd>⌃R</kbd></h3>
-    <div class="tablewrap"><table>
-      <tr><th>Key</th><th>Action</th></tr>
-      <tr><td><kbd>h</kbd> / <kbd>l</kbd></td><td>Narrower / wider</td></tr>
-      <tr><td><kbd>k</kbd> / <kbd>j</kbd></td><td>Taller / shorter</td></tr>
-    </table></div>
-    <p style="color:var(--muted);font-size:14px">In any mode, the menu-bar hint bar shows only the keys that apply right now. <kbd>⏎</kbd>/<kbd>esc</kbd> exits a mode.</p>
+    <!-- The tables below are generated from the app's own binding definitions by
+         scripts/gen-docs.sh (Tessera --dump-keybindings). Do not edit by hand. -->
+    <!-- KEYBINDINGS:START -->
+<h3>Global shortcuts</h3>
+<div class="tablewrap"><table>
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td><kbd>⌃⌥⌘R</kbd> / <kbd>⌃⌥⌘D</kbd></td><td>Split focused window right / down</td></tr>
+<tr><td><kbd>⌃⌥⌘H</kbd> / <kbd>⌃⌥⌘J</kbd> / <kbd>⌃⌥⌘K</kbd> / <kbd>⌃⌥⌘L</kbd></td><td>Focus left / down / up / right</td></tr>
+<tr><td><kbd>⌃⌥⇧⌘H</kbd> / <kbd>⌃⌥⇧⌘J</kbd> / <kbd>⌃⌥⇧⌘K</kbd> / <kbd>⌃⌥⇧⌘L</kbd></td><td>Move window between panes</td></tr>
+<tr><td><kbd>⌃⌥⌘T</kbd> / <kbd>⌃⌥⌘]</kbd> / <kbd>⌃⌥⌘[</kbd></td><td>New tab · next / previous tab</td></tr>
+<tr><td><kbd>⌃⌥⇧⌘P</kbd></td><td>Command palette</td></tr>
+<tr><td><kbd>⌃⌥⇧⌘W</kbd></td><td>Workspace navigator</td></tr>
+<tr><td><kbd>⌃⌥⌘⌫</kbd></td><td>Reset tiling (un-manage everything)</td></tr>
+</table></div>
+<h3>Pane mode — <kbd>⌃P</kbd></h3>
+<div class="tablewrap"><table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><kbd>r</kbd> / <kbd>d</kbd></td><td>Split right / down</td></tr>
+<tr><td><kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd></td><td>Focus pane (or move a floating window)</td></tr>
+<tr><td><kbd>⇧</kbd> + <kbd>hjkl</kbd></td><td>Swap window with neighbour</td></tr>
+<tr><td><kbd>n</kbd> / <kbd>p</kbd></td><td>Cycle focus through all windows</td></tr>
+<tr><td><kbd>f</kbd></td><td>Full-screen (zoom) the pane</td></tr>
+<tr><td><kbd>w</kbd></td><td>Attach / float / re-tile the focused window</td></tr>
+<tr><td><kbd>s</kbd></td><td>Toggle stacked (monocle) layout</td></tr>
+<tr><td><kbd>c</kbd></td><td>Change the pane's window (palette)</td></tr>
+</table></div>
+<h3>Tab mode — <kbd>⌃T</kbd></h3>
+<div class="tablewrap"><table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><kbd>n</kbd></td><td>New tab</td></tr>
+<tr><td><kbd>h</kbd> / <kbd>l</kbd></td><td>Previous / next tab</td></tr>
+<tr><td><kbd>⇧h</kbd> / <kbd>⇧l</kbd></td><td>Move window to previous / next tab</td></tr>
+<tr><td><kbd>m</kbd> … <kbd>⏎</kbd></td><td>Move window to tab # (a number past the end creates it)</td></tr>
+</table></div>
+<h3>Resize mode — <kbd>⌃R</kbd></h3>
+<div class="tablewrap"><table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><kbd>h</kbd> / <kbd>l</kbd></td><td>Narrower / wider</td></tr>
+<tr><td><kbd>k</kbd> / <kbd>j</kbd></td><td>Taller / shorter</td></tr>
+</table></div>
+<p class="muted">In any mode the menu-bar hint bar shows only the keys that apply right now. <kbd>⏎</kbd> / <kbd>esc</kbd> exits a mode.</p>
+    <!-- KEYBINDINGS:END -->
   </section>
 
   <section>
-    <h2>Settings</h2>
-    <p>Open with <kbd>⌘,</kbd> (when Tessera is active) or the menu bar:</p>
-    <ul>
-      <li><strong>General</strong> — tile padding (as a % of screen width), app version.</li>
-      <li><strong>Hotkeys</strong> — rebind any command; <em>Reset to Defaults</em>.</li>
-    </ul>
+    <h2>Usage &amp; configuration</h2>
+
+    <h3>Getting started</h3>
+    <p>After granting Accessibility, Tessera automatically lays your open windows
+      out as <strong>one tab per app</strong> (a multi-window app's windows are
+      stacked so you cycle them with <kbd>n</kbd>/<kbd>p</kbd> in Pane mode). Re-run
+      this anytime from the menu bar → <strong>Organize Windows by App</strong>.
+      From there, split, move windows between tabs, and float as you like.</p>
+
+    <h3>Configuring shortcuts</h3>
+    <p>Open <strong>Settings</strong> — <kbd>⌘,</kbd> while Tessera is active, or the
+      menu-bar <span class="glyph">▚</span> menu → <strong>Settings…</strong> — and
+      pick the <strong>Hotkeys</strong> tab. Click any shortcut and press the new
+      chord to rebind it (at least one modifier required; <kbd>esc</kbd> cancels).
+      <strong>Reset to Defaults</strong> restores the built-in set. Changes apply
+      immediately.</p>
+
+    <h3>Tile padding</h3>
+    <p>In <strong>Settings → General</strong>, drag the <strong>Tile padding</strong>
+      slider — it's a percentage of screen width applied to both the outer margin
+      and the gaps between panes, live. The same tab also shows the app version.</p>
+
+    <h3>Accessibility &amp; menu bar</h3>
+    <p>Tessera runs as a menu-bar agent — the <span class="glyph">▚</span> pill shows
+      your current tab position and active mode. The menu holds the command palette,
+      workspace navigator, Organize&nbsp;Windows&nbsp;by&nbsp;App, Settings, and the
+      Accessibility grant shortcut. Keep <strong>Stage Manager off</strong>.</p>
   </section>
 
   <footer>

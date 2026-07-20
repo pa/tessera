@@ -948,36 +948,43 @@ final class TilingController {
         palette.present(anchorRectAX: rect, excludingWindowIDs: [])
     }
 
-    /// Every tileable, non-minimized, currently-open window (excluding Tessera),
-    /// ordered front-to-back by global z-order (frontmost first). Uses
-    /// `CGWindowList` for the ordering + definitive window set, then resolves each
-    /// to its AX element.
+    /// Every tileable, non-minimized window across all regular apps (excluding
+    /// Tessera), grouped by app with the frontmost app first. Enumerated via
+    /// **AX** (not `CGWindowList`), so it includes windows of apps Tessera has
+    /// hidden/parked — a `CGWindowList` on-screen-only listing would drop those,
+    /// which is what made a second "Organize by app" rebuild from a partial set.
     private func allTileableWindows() -> [WindowRef] {
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        guard let infos = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-        else { return [] }
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        var apps = AppTargeter.regularApps().filter { $0.processIdentifier != ownPID }
+        if let frontPID, let i = apps.firstIndex(where: { $0.processIdentifier == frontPID }) {
+            apps.insert(apps.remove(at: i), at: 0) // frontmost app's tab goes first
+        }
 
         var result: [WindowRef] = []
         var seen = Set<CGWindowID>()
-        var axCache: [pid_t: [AXWindow]] = [:]
-
-        for info in infos {
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
-                  let wid = info[kCGWindowNumber as String] as? CGWindowID,
-                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
-                  pid != ownPID, !seen.contains(wid) else { continue }
-            let windows = axCache[pid] ?? {
-                let w = AppTargeter.windows(of: AXUIElementCreateApplication(pid))
-                axCache[pid] = w
-                return w
-            }()
-            guard let ax = windows.first(where: { $0.windowID == wid }),
-                  ax.isTileable, !ax.isMinimized else { continue }
-            seen.insert(wid)
-            result.append(WindowRef(pid: pid, window: ax))
+        for app in apps {
+            let pid = app.processIdentifier
+            for window in AppTargeter.windows(of: AXUIElementCreateApplication(pid)) {
+                guard let id = window.windowID, !seen.contains(id),
+                      window.isTileable, !window.isMinimized else { continue }
+                seen.insert(id)
+                result.append(WindowRef(pid: pid, window: window))
+            }
         }
         return result
+    }
+
+    /// Bring every managed/hidden/parked window back on-screen and clear hide
+    /// state, so a (re)organize starts from a clean slate.
+    private func restoreAllWindowsOnScreen() {
+        for tab in tabs {
+            let frames = tab.tree.frames(in: workspaceRect, config: config)
+            for (pane, ref) in tab.occupants { if let r = frames[pane] { unpark(ref.window, to: r) } }
+            for floater in tab.floating { unpark(floater.window, to: floater.frame) }
+        }
+        restoreParkedExtras()
+        unhideAllApps()
     }
 
     /// Organize every open window into tabs — **one tab per app**, with a
@@ -987,8 +994,14 @@ final class TilingController {
     /// inactive apps are cleanly `kAXHidden` (no per-window parking).
     func adoptAllWindowsByApp() {
         guard pendingPane == nil else { return }
+        // Reset hide/park state first so re-invoking rebuilds cleanly (no glitch).
+        restoreAllWindowsOnScreen()
+
         let refs = allTileableWindows()
-        guard !refs.isEmpty else { promptFirstWindow(); return }
+        guard !refs.isEmpty else {
+            tabs = [Tab()]; activeTabIndex = 0; zoomedPane = nil; lastTabIndex = nil
+            promptFirstWindow(); return
+        }
 
         // Group by app, preserving frontmost-first order.
         var order: [pid_t] = []

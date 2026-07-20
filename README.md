@@ -1,5 +1,8 @@
 <div align="center">
-  <img src="assets/icon-256.png" width="140" alt="Tessera icon">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.png">
+    <img src="assets/icon-light.png" width="120" alt="Tessera icon">
+  </picture>
   <h1>Tessera</h1>
   <p><strong>A keyboard-driven tiling window manager for macOS — tmux/Zellij workflows for any app.</strong></p>
   <p>
