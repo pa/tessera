@@ -23,7 +23,8 @@
   html{ -webkit-text-size-adjust:100%; }
   body{
     margin:0; background:var(--bg); color:var(--fg);
-    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
   }
   a{ color:var(--accent); text-decoration:none; }
   a:hover{ text-decoration:underline; }
@@ -83,7 +84,7 @@
     <h1>Tessera</h1>
     <p class="tagline">A keyboard-driven tiling window manager for macOS — tmux/Zellij workflows for <em>any</em> app.</p>
     <div class="badges">
-      <span>macOS 14+</span><span>Homebrew</span><span>No Apple Developer ID</span><span>MIT</span>
+      <span>macOS 14+</span><span>Homebrew</span><span>MIT</span>
     </div>
   </header>
 
@@ -92,8 +93,7 @@
     <pre><code>brew tap pa/tessera https://github.com/pa/tessera
 brew install --HEAD tessera
 brew services start tessera</code></pre>
-    <p class="note">A single Swift binary built from source — no notarization, no
-      quarantine. Then grant <strong>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security → Accessibility → Tessera</strong>.
+    <p class="note">After installing, grant <strong>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security → Accessibility → Tessera</strong>.
       The grant survives every <code>brew upgrade</code>. Keep <strong>Stage Manager off</strong>.</p>
   </div>
 

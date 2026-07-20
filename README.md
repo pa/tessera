@@ -8,7 +8,6 @@
   <p>
     <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
     <img src="https://img.shields.io/badge/install-Homebrew-orange?logo=homebrew" alt="Homebrew">
-    <img src="https://img.shields.io/badge/no-Apple%20Developer%20ID-brightgreen" alt="No Developer ID">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   </p>
 </div>
@@ -20,8 +19,7 @@ Dock icon, no window.
 
 ## Install
 
-Homebrew only — a single Swift binary built from source, so **no Apple Developer
-ID, no notarization, no Gatekeeper quarantine**:
+Install via Homebrew:
 
 ```sh
 brew tap pa/tessera https://github.com/pa/tessera
