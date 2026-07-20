@@ -948,6 +948,84 @@ final class TilingController {
         palette.present(anchorRectAX: rect, excludingWindowIDs: [])
     }
 
+    /// Every tileable, non-minimized, currently-open window (excluding Tessera),
+    /// ordered front-to-back by global z-order (frontmost first). Uses
+    /// `CGWindowList` for the ordering + definitive window set, then resolves each
+    /// to its AX element.
+    private func allTileableWindows() -> [WindowRef] {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        guard let infos = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return [] }
+
+        var result: [WindowRef] = []
+        var seen = Set<CGWindowID>()
+        var axCache: [pid_t: [AXWindow]] = [:]
+
+        for info in infos {
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let wid = info[kCGWindowNumber as String] as? CGWindowID,
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                  pid != ownPID, !seen.contains(wid) else { continue }
+            let windows = axCache[pid] ?? {
+                let w = AppTargeter.windows(of: AXUIElementCreateApplication(pid))
+                axCache[pid] = w
+                return w
+            }()
+            guard let ax = windows.first(where: { $0.windowID == wid }),
+                  ax.isTileable, !ax.isMinimized else { continue }
+            seen.insert(wid)
+            result.append(WindowRef(pid: pid, window: ax))
+        }
+        return result
+    }
+
+    /// Organize every open window into tabs — **one tab per app**, with a
+    /// multi-window app's windows **stacked** (monocle) so `n/p` cycles them. The
+    /// frontmost app's tab is active. This is the startup default (no saved
+    /// session) and a re-runnable command. One-app-per-tab makes hiding exact:
+    /// inactive apps are cleanly `kAXHidden` (no per-window parking).
+    func adoptAllWindowsByApp() {
+        guard pendingPane == nil else { return }
+        let refs = allTileableWindows()
+        guard !refs.isEmpty else { promptFirstWindow(); return }
+
+        // Group by app, preserving frontmost-first order.
+        var order: [pid_t] = []
+        var byApp: [pid_t: [WindowRef]] = [:]
+        for ref in refs {
+            if byApp[ref.pid] == nil { order.append(ref.pid) }
+            byApp[ref.pid, default: []].append(ref)
+        }
+
+        var built: [Tab] = []
+        for pid in order {
+            let windows = byApp[pid]!
+            var tab = Tab()
+            tab.occupants[PaneID(0)] = windows[0]
+            tab.focusedPane = PaneID(0)
+            for ref in windows.dropFirst() {
+                if let newPane = tab.tree.split(tab.focusedPane, orientation: .horizontal) {
+                    tab.occupants[newPane] = ref
+                    tab.focusedPane = newPane
+                }
+            }
+            tab.focusedPane = PaneID(0)
+            tab.stacked = windows.count > 1   // stack multi-window apps
+            built.append(tab)
+        }
+
+        tabs = built
+        activeTabIndex = 0
+        zoomedPane = nil
+        lastTabIndex = nil
+        knownWindowIDs = Set(refs.compactMap { $0.window.windowID })
+        applyWorkspaceVisibility()
+        relayout()
+        if let ref = occupants[focusedPane] { focus(ref) }
+        onWorkspaceChange?()
+    }
+
     /// Tear down the tiling session: bring every tab's windows back on-screen
     /// (some are parked off-screen while their tab is inactive) and collapse to a
     /// single empty tab.
@@ -1039,6 +1117,28 @@ final class TilingController {
 
     func moveFocusedToNextTab() { moveFocusedToTab((activeTabIndex + 1) % tabs.count) }
     func moveFocusedToPreviousTab() { moveFocusedToTab((activeTabIndex - 1 + tabs.count) % tabs.count) }
+
+    /// Move the focused window to 1-based tab `n`. Existing tab → move/split;
+    /// beyond the current count → create a new tab and move there.
+    func moveFocusedToTabNumber(_ n: Int) {
+        guard pendingPane == nil, n >= 1 else { NSSound.beep(); return }
+        let idx = n - 1
+        if idx == activeTabIndex { return }            // already on that tab
+        if tabs.indices.contains(idx) {
+            moveFocusedToTab(idx)                       // existing tab (splits if occupied)
+        } else {
+            moveFocusedToNewTab()                        // next available → create + move
+        }
+    }
+
+    /// Append a fresh tab and move the focused window into it. No-op (no empty
+    /// tab left behind) if there's nothing focused to move.
+    private func moveFocusedToNewTab() {
+        syncFocusFromLiveWindow()
+        guard occupants[focusedPane] != nil || focusedFloatingIndex() != nil else { NSSound.beep(); return }
+        tabs.append(Tab())
+        moveFocusedToTab(tabs.count - 1)
+    }
 
     /// Move the focused window (tiled or floating) out of the current tab and
     /// into `targetIndex`. The current tab reflows; we stay put so the window

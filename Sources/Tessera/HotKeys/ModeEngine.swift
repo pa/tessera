@@ -56,6 +56,13 @@ final class ModeEngine {
     var onAfterAction: (() -> Void)?
 
     private let tiling: TilingController
+
+    /// While non-nil, Tab mode is capturing a tab-number to move the focused
+    /// window to (typed inline in the HUD). Empty string = "prompt shown, no
+    /// digits yet". Exposed so the HUD can render it.
+    private var tabMoveBuffer: String?
+    var pendingTabMove: String? { tabMoveBuffer }
+
     private var paneEntry = Chord(keyCode: Int64(kVK_ANSI_P), flags: .maskControl)
     private var tabEntry = Chord(keyCode: Int64(kVK_ANSI_T), flags: .maskControl)
     private var resizeEntry = Chord(keyCode: Int64(kVK_ANSI_R), flags: .maskControl)
@@ -140,6 +147,16 @@ final class ModeEngine {
 
         // Inside a mode: strict capture — consume every keydown.
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+
+        // Tab mode "move to tab #": while capturing digits, route keys to the
+        // buffer (Enter moves, Esc cancels) before the generic mode handling.
+        if mode == .tab, tabMoveBuffer != nil {
+            handleTabMoveEntry(keyCode: keyCode)
+            onAfterAction?()      // re-render the HUD with the current buffer
+            refreshTimeout()
+            return true
+        }
+
         if keyCode == kVK_Escape || keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter {
             setMode(.normal)
             return true
@@ -184,6 +201,7 @@ final class ModeEngine {
                 if shift { tiling.moveFocusedToNextTab() } else { tiling.nextTab() }
             case kVK_ANSI_H:
                 if shift { tiling.moveFocusedToPreviousTab() } else { tiling.previousTab() }
+            case kVK_ANSI_M: tabMoveBuffer = "" // start inline tab-number entry (typed in the HUD)
             default: break // swallowed
             }
         case .resize:
@@ -209,6 +227,7 @@ final class ModeEngine {
     // MARK: - Mode state
 
     private func setMode(_ newMode: Mode) {
+        tabMoveBuffer = nil   // any pending number entry is abandoned on mode change
         mode = newMode
         if newMode == .normal {
             timeout?.cancel()
@@ -216,6 +235,38 @@ final class ModeEngine {
         } else {
             refreshTimeout()
         }
+    }
+
+    /// Handle a keystroke while capturing a tab number (Tab mode → `m`).
+    private func handleTabMoveEntry(keyCode: Int) {
+        if let digit = Self.digit(for: keyCode) {
+            tabMoveBuffer = (tabMoveBuffer ?? "") + String(digit)
+            return
+        }
+        switch keyCode {
+        case kVK_Delete:
+            if var b = tabMoveBuffer, !b.isEmpty { b.removeLast(); tabMoveBuffer = b }
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            let n = Int(tabMoveBuffer ?? "")
+            tabMoveBuffer = nil
+            if let n { tiling.moveFocusedToTabNumber(n) }
+            setMode(.normal)          // committed → leave the mode
+        case kVK_Escape:
+            tabMoveBuffer = nil       // cancel entry, stay in Tab mode
+        default:
+            break                     // ignore non-digit keys
+        }
+    }
+
+    private static func digit(for keyCode: Int) -> Int? {
+        let map: [Int: Int] = [
+            kVK_ANSI_0: 0, kVK_ANSI_1: 1, kVK_ANSI_2: 2, kVK_ANSI_3: 3, kVK_ANSI_4: 4,
+            kVK_ANSI_5: 5, kVK_ANSI_6: 6, kVK_ANSI_7: 7, kVK_ANSI_8: 8, kVK_ANSI_9: 9,
+            kVK_ANSI_Keypad0: 0, kVK_ANSI_Keypad1: 1, kVK_ANSI_Keypad2: 2, kVK_ANSI_Keypad3: 3,
+            kVK_ANSI_Keypad4: 4, kVK_ANSI_Keypad5: 5, kVK_ANSI_Keypad6: 6, kVK_ANSI_Keypad7: 7,
+            kVK_ANSI_Keypad8: 8, kVK_ANSI_Keypad9: 9,
+        ]
+        return map[keyCode]
     }
 
     private func refreshTimeout() {

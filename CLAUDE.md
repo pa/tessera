@@ -238,10 +238,21 @@ All six brief milestones are complete.
 - New Tab pops the palette for its first window; tab hide/show is per-window
   off-screen parking (see "z-order reality" caveat — still bounded by apps that
   clamp window position on-screen).
+- **Organize windows by app** (`adoptAllWindowsByApp`, menu: "Organize Windows by
+  App", and the startup default when there's no saved session) — enumerate every
+  open window (`CGWindowList` for global z-order + AX resolve, `isTileable` +
+  non-minimized), then build **one tab per app** with the frontmost app's tab
+  active; a multi-window app's windows go in that tab **stacked** (monocle, `n/p`
+  to cycle). One-app-per-tab makes hiding exact — inactive apps are cleanly
+  `kAXHidden`, no per-window parking. From there the user reorganizes freely
+  (move-to-tab combines into a split via `addToTab`, `w attach`, etc.); ongoing
+  auto-tile stays window-based (new windows → active tab).
 
 Pane mode keys: r/d split, hjkl focus (or move a floating window), ⇧hjkl swap,
 f fullscreen, w float, c change window. Tab mode: n new, h/l prev/next,
-⇧h/⇧l move window to tab. Resize mode: hjkl.
+⇧h/⇧l move window to prev/next tab, m move window to a tab # (type the number
+inline in the HUD, ⏎ to move; a number beyond the count creates that tab).
+Resize mode: hjkl.
 
 ## Roadmap (paneru-inspired, planned)
 

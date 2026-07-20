@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 guard let self else { return }
                 let restored = SessionStore.load().map { self.tiling.restoreSession($0) } ?? false
-                if !restored { self.tiling.promptFirstWindow() }
+                if !restored { self.tiling.adoptAllWindowsByApp() }
                 self.startSessionAutosave()
             }
         }
@@ -132,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         navigatorItem.target = self
         navigatorItem.isEnabled = trusted
         menu.addItem(navigatorItem)
+        let organize = NSMenuItem(title: "Organize Windows by App", action: #selector(organizeByApp), keyEquivalent: "")
+        organize.target = self
+        organize.isEnabled = trusted
+        menu.addItem(organize)
 
         menu.addItem(.separator())
         // ⌘, opens Settings when Tessera is active (e.g. this menu / a Tessera
@@ -196,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() { settingsWindow.show() }
+    @objc private func organizeByApp() { tiling.adoptAllWindowsByApp() }
 
     /// Reflect the active input mode in the menu-bar glyph and the HUD hint bar.
     /// In normal mode the glyph shows the current tab position (▚ 2/3); a mode
@@ -219,6 +224,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tabCount = tiling.tabSummary.count
         let windows = panes + floating
         let focus = tiling.focusState()
+
+        // Inline "move to tab #" entry (typed into the HUD) takes over the strip.
+        if mode == .tab, let pending = modeEngine.pendingTabMove {
+            let shown = pending.isEmpty ? "▏" : "\(pending)▏"
+            return "MOVE TO TAB  \(shown)   ·   1–\(tabCount) move · \(tabCount + 1)=new tab · ⌫ del · ⏎ move · esc cancel"
+        }
 
         switch mode {
         case .normal:
@@ -244,9 +255,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return "PANE   " + seg.joined(separator: " · ")
         case .tab:
             var seg = ["n new"]
-            if tabCount > 1 {
-                seg.append("h/l prev/next")
-                if focus == .tiled || focus == .floating { seg.append("⇧h/⇧l move to tab") }
+            if tabCount > 1 { seg.append("h/l prev/next") }
+            if focus == .tiled || focus == .floating {
+                if tabCount > 1 { seg.append("⇧h/⇧l move to tab") }
+                seg.append("m move to #")
             }
             seg.append("⏎/esc done")
             return "TAB   " + seg.joined(separator: " · ")
