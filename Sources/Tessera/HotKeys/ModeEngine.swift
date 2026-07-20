@@ -51,6 +51,10 @@ final class ModeEngine {
     }
     var onModeChange: ((Mode) -> Void)?
 
+    /// Fired after an in-mode action key is handled (while staying in the mode),
+    /// so the HUD can re-evaluate which context keys still apply.
+    var onAfterAction: (() -> Void)?
+
     private let tiling: TilingController
     private var paneEntry = Chord(keyCode: Int64(kVK_ANSI_P), flags: .maskControl)
     private var tabEntry = Chord(keyCode: Int64(kVK_ANSI_T), flags: .maskControl)
@@ -145,6 +149,7 @@ final class ModeEngine {
         if chord == resizeEntry { setMode(.resize); return true }
 
         performModeKey(keyCode: keyCode, shift: event.flags.contains(.maskShift))
+        if mode != .normal { onAfterAction?() } // still in a mode → refresh its hints
         refreshTimeout()
         return true
     }

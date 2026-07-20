@@ -217,17 +217,24 @@ All six brief milestones are complete.
 - **Full-screen (zoom)** — the focused pane fills the workspace; others park
   off-screen. Toggles; auto-clears on tab switch / reset / window close. Distinct
   from macOS **native** fullscreen (below).
+- **Uncooperative apps overflow (no auto-float)** — pure-AX WMs can't force an
+  app below its minimum size (only yabai can, via a SIP-disabled WindowServer
+  injection Tessera won't use). A window that refuses to shrink to its pane is
+  left to **overflow** — enforcement anchors its top-left at the pane origin and
+  requests the pane size each tick; the app clamps what it will. (An earlier
+  build auto-floated such windows, but that misfired on lazily-resizing apps like
+  Chromium, so it was removed.) Manual float (`w`) is still available.
 - **Native-fullscreen exemption** — a window in macOS native fullscreen (e.g. a
   browser video ⛶, which moves it to its own Space and fills the display) is
-  detected via the `AXFullScreen` attribute and left entirely alone: not
-  float-ed out for overflowing its pane, not re-snapped by enforcement, its pane
-  preserved. Without this, the enforcement/float loops floated it and moved
-  `focusedPane`, so exiting fullscreen landed focus on a *different* window. It
-  re-snaps to its pane on the first tick after exiting.
+  detected via the `AXFullScreen` attribute or a frame covering ≥98% of the
+  display (for HTML5 video fullscreen, which doesn't set `AXFullScreen`) and
+  skipped by layout enforcement, so it isn't fought back into its pane. It
+  re-snaps on the first tick after exiting.
 - **Floating panes** — toggle a window out of the BSP tree to float above the
   tiles (centered), move it freely with hjkl in Pane mode, and re-tile it.
   Floating windows are exempt from layout enforcement; they park/restore with
-  their tab.
+  their tab. In Pane mode, `w` is state-aware: **attach** an unmanaged focused
+  window, **float** a tiled one, **tile** a floating one.
 - New Tab pops the palette for its first window; tab hide/show is per-window
   off-screen parking (see "z-order reality" caveat — still bounded by apps that
   clamp window position on-screen).

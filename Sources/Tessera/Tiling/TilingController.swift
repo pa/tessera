@@ -101,10 +101,6 @@ final class TilingController {
     private let autoTileEnabled = true
     /// Standard window ids seen so far, so auto-tile only grabs *new* windows.
     private var knownWindowIDs: Set<CGWindowID> = []
-    /// When each window was placed, so auto-float gives freshly-tiled windows a
-    /// grace period to settle into their pane before deciding they can't fit.
-    private var placedAt: [CGWindowID: Date] = [:]
-    private let floatGrace: TimeInterval = 2.0
 
     /// Non-tiled windows of managed apps that we've parked off-screen (so only
     /// the tiled window of a multi-window app shows), keyed by CGWindowID with
@@ -205,43 +201,8 @@ final class TilingController {
         guard pendingPane == nil else { return false } // don't disturb a split-in-progress
         var acted = removeClosedWindows()
         if autoTileEnabled { acted = autoTileNewWindows() || acted }
-        acted = floatOversizedWindows() || acted
         acted = enforceLayout() || acted
         return acted
-    }
-
-    /// A window that refuses to shrink to its pane (min-size apps) spills over its
-    /// neighbors. Pop such windows out to floating so the pane collapses and the
-    /// remaining tiles reclaim the space.
-    @discardableResult
-    private func floatOversizedWindows() -> Bool {
-        guard !tabs[activeTabIndex].stacked, zoomedPane == nil else { return false }
-        let frames = self.frames()
-        let now = Date()
-        let oversized = occupants.compactMap { pane, ref -> (PaneID, WindowRef, CGRect)? in
-            guard let rect = frames[pane], let actual = ref.window.frame else { return nil }
-            // A fullscreen window (native, or a browser's HTML5 video fullscreen)
-            // fills the display; that's not "oversized for its pane" — leave it and
-            // its pane alone, or we'd float it out and shift focus to a neighbor.
-            if isFullscreenLike(ref.window, frame: actual) { return nil }
-            // Skip windows still within their settle grace period.
-            if let id = ref.window.windowID, let placed = placedAt[id], now.timeIntervalSince(placed) < floatGrace {
-                return nil
-            }
-            let overflows = actual.width > rect.width + 24 || actual.height > rect.height + 24
-            return overflows ? (pane, ref, actual) : nil
-        }
-        guard !oversized.isEmpty else { return false }
-
-        for (pane, ref, actual) in oversized {
-            tree.remove(pane)
-            occupants[pane] = nil
-            if focusedPane == pane { focusedPane = tree.paneIDs.first ?? PaneID(0) }
-            tabs[activeTabIndex].floating.append(FloatingWindow(pid: ref.pid, window: ref.window, frame: actual))
-        }
-        relayout()
-        applyWorkspaceVisibility()
-        return true
     }
 
     /// Adopt a just-created window into the active tab, if auto-tiling is on and
@@ -563,6 +524,20 @@ final class TilingController {
     func toggleFloat() {
         guard pendingPane == nil else { return }
 
+        // Unmanaged focused window → attach it into the active tab (tiled).
+        if focusState() == .unmanaged, let f = focusedWindowProvider() {
+            if let id = f.window.windowID {
+                detachWindow(id)  // if it lives in another tab, move it — never duplicate
+                knownWindowIDs.insert(id)
+            }
+            addToLayout(WindowRef(pid: f.pid, window: f.window))
+            relayout()
+            applyWorkspaceVisibility()
+            if let ref = occupants[focusedPane] { focus(ref) }
+            gcEmptyTabs()
+            return
+        }
+
         if let index = focusedFloatingIndex() {
             // Floating → tiled: pull it back into the BSP layout.
             let floater = tabs[activeTabIndex].floating.remove(at: index)
@@ -631,7 +606,6 @@ final class TilingController {
             occupants[newPane] = ref
             focusedPane = newPane
         }
-        if let id = ref.window.windowID { placedAt[id] = Date() }
     }
 
     /// Split along the focused pane's longer axis, so an auto-placed window snaps
@@ -1005,6 +979,17 @@ final class TilingController {
 
     /// Number of floating windows in the active tab.
     var activeFloatingCount: Int { tabs[activeTabIndex].floating.count }
+
+    /// How the live focused window relates to the active tab — drives which
+    /// context keys the HUD offers.
+    enum FocusState { case tiled, floating, unmanaged, empty }
+
+    func focusState() -> FocusState {
+        guard let f = focusedWindowProvider(), let id = f.window.windowID else { return .empty }
+        if occupants.values.contains(where: { $0.window.windowID == id }) { return .tiled }
+        if tabs[activeTabIndex].floating.contains(where: { $0.window.windowID == id }) { return .floating }
+        return .unmanaged
+    }
 
     /// Open a fresh tab: hide the current tab's apps, then pop the palette to
     /// pick the window that fills the new tab. Cancelling returns to the tab you

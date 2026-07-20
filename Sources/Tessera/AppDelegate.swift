@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var modeEngine: ModeEngine = {
         let engine = ModeEngine(tiling: tiling)
         engine.onModeChange = { [weak self] mode in self?.applyMode(mode) }
+        engine.onAfterAction = { [weak self] in self?.refreshStatusIndicator() }
         return engine
     }()
     private var bindingSet = HotKeyStore.load()
@@ -217,27 +218,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let floating = tiling.activeFloatingCount
         let tabCount = tiling.tabSummary.count
         let windows = panes + floating
+        let focus = tiling.focusState()
 
         switch mode {
         case .normal:
             return nil
         case .pane:
-            var seg = ["r/d split"]
-            if panes > 1 { seg.append("hjkl focus"); seg.append("⇧hjkl swap") }
-            else if floating > 0 { seg.append("hjkl move") }
+            var seg: [String] = []
+            if focus == .tiled || panes == 0 { seg.append("r/d split") }
+            if panes > 1 { seg.append("hjkl focus") }
+            if focus == .tiled && panes > 1 { seg.append("⇧hjkl swap") }
             if windows > 1 { seg.append("n/p cycle") }
-            if windows >= 1 { seg.append("f full"); seg.append("w float") }
+            if focus == .tiled { seg.append("f full") }
+            // `w` toggles a window in/out of tiling — its meaning depends on the
+            // focused window's current state.
+            switch focus {
+            case .unmanaged: seg.append("w attach")
+            case .tiled:     seg.append("w float")
+            case .floating:  seg.append("w tile")
+            case .empty:     break
+            }
             if panes > 1 { seg.append("s stack") }
-            if windows >= 1 { seg.append("c change") }
+            if focus == .tiled { seg.append("c change") }
             seg.append("⏎/esc done")
             return "PANE   " + seg.joined(separator: " · ")
         case .tab:
             var seg = ["n new"]
-            if tabCount > 1 { seg.append("h/l prev/next"); seg.append("⇧h/⇧l move to tab") }
+            if tabCount > 1 {
+                seg.append("h/l prev/next")
+                if focus == .tiled || focus == .floating { seg.append("⇧h/⇧l move to tab") }
+            }
             seg.append("⏎/esc done")
             return "TAB   " + seg.joined(separator: " · ")
         case .resize:
-            if panes <= 1 { return "RESIZE   single pane — nothing to resize · ⏎/esc done" }
+            if focus != .tiled || panes <= 1 {
+                return "RESIZE   nothing to resize here · ⏎/esc done"
+            }
             return "RESIZE   h narrower · l wider · k taller · j shorter · ⏎/esc done"
         }
     }
