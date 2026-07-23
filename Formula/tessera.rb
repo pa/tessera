@@ -3,8 +3,8 @@
 # Canonical copy lives in the tap repo github.com/pa/homebrew-tessera, so users
 # install cleanly with:
 #   brew tap pa/tessera          # infers github.com/pa/homebrew-tessera
+#   brew trust pa/tessera        # one-time; Homebrew requires trusting 3rd-party taps
 #   brew install tessera
-# or the one-liner:  brew install pa/tessera/tessera
 #
 # (This copy in the main repo is kept in sync as a reference.)
 #

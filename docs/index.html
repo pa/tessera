@@ -130,13 +130,14 @@
     <h2>Install via Homebrew.</h2>
     <p class="lead">A single command sets up the tap and the background agent.</p>
     <div class="code">
-      <button class="copy" data-copy="brew tap pa/tessera https://github.com/pa/tessera&#10;brew install --HEAD tessera&#10;brew services start tessera">COPY</button>
-      <pre><span class="prompt">$ </span>brew tap pa/tessera https://github.com/pa/tessera
-<span class="prompt">$ </span>brew install --HEAD tessera
+      <button class="copy" data-copy="brew tap pa/tessera&#10;brew install tessera&#10;brew services start tessera">COPY</button>
+      <pre><span class="prompt">$ </span>brew tap pa/tessera
+<span class="prompt">$ </span>brew install tessera
 <span class="prompt">$ </span>brew services start tessera</pre>
     </div>
-    <p class="lead" style="margin-top:16px">Then grant <strong>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security → Accessibility → Tessera</strong>,
-      and keep <strong>Stage Manager off</strong>.</p>
+    <p class="lead" style="margin-top:16px">If Homebrew refuses an <em>untrusted tap</em>, run <code>brew trust pa/tessera</code> once, then re-run the install.
+      Then grant <strong>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security → Accessibility → Tessera</strong>,
+      and keep <strong>Stage Manager off</strong>. It's a menu-bar agent — look for the <span class="glyph">▚</span> glyph (no Dock/Applications icon).</p>
   </section>
 
   <section>
