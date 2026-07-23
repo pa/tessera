@@ -22,7 +22,7 @@ class Tessera < Formula
   # new version: push a new tag, then bump `url` + `sha256` (the checksum of the
   # tag's source tarball: `curl -sL <url> | shasum -a 256`).
   url "https://github.com/pa/tessera/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "98014312b01fb009dfe158b86c7dbf9a9f315a73f802d06a7e6d8e64d7a32327"
+  sha256 "e250de5f48edac3d2252d9502808b947eda4672107c9b5383531b707dadadce3"
   head "https://github.com/pa/tessera.git", branch: "main"
 
   # Needs only the Swift toolchain from the Xcode Command Line Tools, which
