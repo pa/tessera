@@ -1,11 +1,12 @@
 # Homebrew formula for Tessera.
 #
-# Install via a tap:
-#   brew tap pa/tessera https://github.com/pa/tessera
+# Canonical copy lives in the tap repo github.com/pa/homebrew-tessera, so users
+# install cleanly with:
+#   brew tap pa/tessera          # infers github.com/pa/homebrew-tessera
 #   brew install tessera
+# or the one-liner:  brew install pa/tessera/tessera
 #
-# Or straight from this file in a checkout:
-#   brew install --HEAD ./Formula/tessera.rb
+# (This copy in the main repo is kept in sync as a reference.)
 #
 # Tessera ships as a single Swift binary (no .app wrapper): Info.plist is
 # embedded into the Mach-O `__TEXT,__info_plist` section at link time, so the
@@ -16,12 +17,13 @@ class Tessera < Formula
   desc "Menu-bar tiling window manager that puppets GUI apps via Accessibility"
   homepage "https://github.com/pa/tessera"
   license "MIT"
-  head "https://github.com/pa/tessera.git", branch: "main"
 
-  # For tagged releases, point at the source tarball and its checksum:
-  #   url "https://github.com/pa/tessera/archive/refs/tags/v0.1.0.tar.gz"
-  #   sha256 "..."
-  #   version "0.1.0"
+  # Stable release (so `brew install tessera` works without --HEAD). To ship a
+  # new version: push a new tag, then bump `url` + `sha256` (the checksum of the
+  # tag's source tarball: `curl -sL <url> | shasum -a 256`).
+  url "https://github.com/pa/tessera/archive/refs/tags/v0.1.0.tar.gz"
+  sha256 "98014312b01fb009dfe158b86c7dbf9a9f315a73f802d06a7e6d8e64d7a32327"
+  head "https://github.com/pa/tessera.git", branch: "main"
 
   # Needs only the Swift toolchain from the Xcode Command Line Tools, which
   # Homebrew itself installs — so no extra tools beyond `brew`. (Deliberately
