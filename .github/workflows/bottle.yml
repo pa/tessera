@@ -27,8 +27,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14   # arm64, Sonoma
-          - os: macos-15   # arm64, Sequoia
+          - os: macos-15   # arm64, Sequoia (minimum supported macOS)
     runs-on: ${{ matrix.os }}
     steps:
       - name: Resolve tag

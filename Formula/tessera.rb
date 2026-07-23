@@ -29,8 +29,8 @@ class Tessera < Formula
   # Homebrew itself installs — so no extra tools beyond `brew`. (Deliberately
   # NOT `depends_on xcode`: this is a pure SwiftPM build and doesn't need the
   # full ~10 GB Xcode.app; requiring it also makes brew reject a merely-outdated
-  # Xcode.) macOS 14+ matches Package.swift's platform floor.
-  depends_on macos: :sonoma
+  # Xcode.) macOS 15+ matches Package.swift's platform floor.
+  depends_on macos: :sequoia
 
   def install
     system "swift", "build", "--disable-sandbox", "-c", "release"

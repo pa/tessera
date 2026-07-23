@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "Tessera",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v15)
     ],
     targets: [
         // Pure, UI-independent geometry & layout logic. No AppKit — only

@@ -6,7 +6,7 @@
   <h1>Tessera</h1>
   <p><strong>A keyboard-driven tiling window manager for macOS — tmux/Zellij workflows for any app.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
+    <img src="https://img.shields.io/badge/macOS-15%2B-black?logo=apple" alt="macOS 15+">
     <img src="https://img.shields.io/badge/install-Homebrew-orange?logo=homebrew" alt="Homebrew">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   </p>

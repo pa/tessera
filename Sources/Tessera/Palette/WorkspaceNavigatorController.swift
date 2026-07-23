@@ -157,7 +157,7 @@ final class WorkspaceNavigatorController: NSObject {
             }
             roots = allRoots.compactMap { tab in
                 if matches(tab) { return tab }
-                let hits = tab.children.filter(matches)
+                let hits = tab.children.filter { matches($0) }
                 guard !hits.isEmpty else { return nil }
                 return Node(title: tab.title, subtitle: tab.subtitle, icon: tab.icon,
                             isGroup: tab.isGroup, emphasized: tab.emphasized,

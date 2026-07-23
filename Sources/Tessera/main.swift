@@ -6,7 +6,7 @@ import AppKit
 // what the AppKit APIs below require.
 // Docs generation: print the keyboard-reference HTML and exit, before any
 // signing/AppKit setup (used by scripts/gen-docs.sh).
-if CommandLine.arguments.contains("--dump-keybindings") {
+if ProcessInfo.processInfo.arguments.contains("--dump-keybindings") {
     print(KeyReference.html())
     exit(0)
 }

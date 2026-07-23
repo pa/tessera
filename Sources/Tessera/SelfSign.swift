@@ -67,7 +67,7 @@ enum SelfSign {
 
     private static func executablePath() -> String? {
         if let path = Bundle.main.executablePath { return path }
-        return CommandLine.arguments.first.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        return ProcessInfo.processInfo.arguments.first.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
     }
 
     private static func isSigned(_ path: String, with identity: String) -> Bool {
@@ -117,7 +117,7 @@ enum SelfSign {
         // SETEXEC replaces the current image (like execv) instead of forking, so
         // launchd/the shell keeps tracking the same pid — but now disclaimed.
         posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETEXEC))
-        var argv = CommandLine.arguments.map { strdup($0) }
+        var argv = ProcessInfo.processInfo.arguments.map { strdup($0) }
         argv.append(nil)
         let rc = posix_spawn(nil, path, nil, &attr, argv, environ)
         // With POSIX_SPAWN_SETEXEC this only returns on failure.
