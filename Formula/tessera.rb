@@ -25,6 +25,13 @@ class Tessera < Formula
   sha256 "ac8c301e614561048f110cbcc12678da579a836d5e55472c8f365e8e2312f29c"
   head "https://github.com/pa/tessera.git", branch: "main"
 
+  # Prebuilt binaries — so `brew install tessera` downloads in seconds instead of
+  # compiling. Built by .github/workflows/bottle.yml and uploaded to the release.
+  bottle do
+    root_url "https://github.com/pa/tessera/releases/download/v0.1.1"
+    sha256 cellar: :any_skip_relocation, arm64_sequoia: "ac9f59be5d4d2989f2bf2cda970a0133020f1ba589babafd2ffab969d644ccde"
+  end
+
   # Needs only the Swift toolchain from the Xcode Command Line Tools, which
   # Homebrew itself installs — so no extra tools beyond `brew`. (Deliberately
   # NOT `depends_on xcode`: this is a pure SwiftPM build and doesn't need the
