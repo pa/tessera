@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let engine = ModeEngine(tiling: tiling)
         engine.onModeChange = { [weak self] mode in self?.applyMode(mode) }
         engine.onAfterAction = { [weak self] in self?.refreshStatusIndicator() }
+        engine.onKeyFlash = { [weak self] char, shift in self?.modeHUD.flash(char, shift: shift) }
         return engine
     }()
     private var bindingSet = HotKeyStore.load()
@@ -67,6 +68,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tiling.startEnforcing()
         windowObserver.onWindowCreated = { [weak self] pid, window in
             self?.tiling.handleWindowCreated(pid: pid, window: window)
+        }
+        windowObserver.onWindowDestroyed = { [weak self] in
+            self?.tiling.handleWindowDestroyed()
+        }
+        windowObserver.onWindowMovedOrResized = { [weak self] window in
+            self?.tiling.handleWindowMovedOrResized(window)
+        }
+        windowObserver.onFocusedWindowChanged = { [weak self] pid, window in
+            self?.tiling.handleFocusedWindowChanged(pid, window)
         }
         windowObserver.start()
 
@@ -120,6 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusRow.isEnabled = !trusted
         menu.addItem(statusRow)
 
+        // Stage Manager conflicts with tiling (it hides inactive apps' windows).
+        if StageManager.isEnabled {
+            let warn = NSMenuItem(title: "⚠︎ Stage Manager is ON — click to turn it off",
+                                  action: #selector(openStageManagerSettings), keyEquivalent: "")
+            warn.target = self
+            menu.addItem(warn)
+        }
+
         menu.addItem(.separator())
         // Deliberately minimal: the palette and navigator are the only actions
         // here (everything else lives on hotkeys / modes). The chord in each
@@ -154,6 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.keyEquivalentModifierMask = [.command]
         settingsItem.target = self
         menu.addItem(settingsItem)
+        let star = NSMenuItem(title: "★ Star on GitHub", action: #selector(starOnGitHub), keyEquivalent: "")
+        star.target = self
+        menu.addItem(star)
         menu.addItem(NSMenuItem(title: "Quit Tessera", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -212,8 +233,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openSettings() { settingsWindow.show() }
     @objc private func organizeByApp() { tiling.adoptAllWindowsByApp() }
 
+    @objc private func starOnGitHub() {
+        if let url = URL(string: "https://github.com/pa/tessera") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Pause/resume window management: stop tiling, hand windows back to macOS,
     /// and let global shortcuts / modes fall through — or restore all of it.
+    @objc private func openStageManagerSettings() { StageManager.openSettings() }
+
     @objc private func togglePause() {
         isPaused.toggle()
         if isPaused {
@@ -257,42 +286,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return "MOVE TO TAB  \(shown)   ·   1–\(tabCount) move · \(tabCount + 1)=new tab · ⌫ del · ⏎ move · esc cancel"
         }
 
+        // Wrap a key glyph in markers so the HUD renders it as a chip and can
+        // highlight it when pressed.
+        func k(_ s: String) -> String { "\u{01}\(s)\u{02}" }
+        let done = "\(k("⏎"))/\(k("esc")) done"
+
         switch mode {
         case .normal:
             return nil
         case .pane:
             var seg: [String] = []
-            if focus == .tiled || panes == 0 { seg.append("r/d split") }
-            if panes > 1 { seg.append("hjkl focus") }
-            if focus == .tiled && panes > 1 { seg.append("⇧hjkl swap") }
-            if windows > 1 { seg.append("n/p cycle") }
-            if focus == .tiled { seg.append("f full") }
-            // `w` toggles a window in/out of tiling — its meaning depends on the
-            // focused window's current state.
+            if focus == .tiled || panes == 0 { seg.append("\(k("r"))/\(k("d")) split") }
+            if panes > 1 { seg.append("\(k("hjkl")) focus") }
+            if focus == .tiled && panes > 1 { seg.append("\(k("⇧hjkl")) swap") }
+            if windows > 1 { seg.append("\(k("n"))/\(k("p")) cycle") }
+            if focus == .tiled { seg.append("\(k("f")) full") }
             switch focus {
-            case .unmanaged: seg.append("w attach")
-            case .tiled:     seg.append("w float")
-            case .floating:  seg.append("w tile")
+            case .unmanaged: seg.append("\(k("w")) attach")
+            case .tiled:     seg.append("\(k("w")) float")
+            case .floating:  seg.append("\(k("w")) tile")
             case .empty:     break
             }
-            if panes > 1 { seg.append("s stack") }
-            if focus == .tiled { seg.append("c change") }
-            seg.append("⏎/esc done")
+            if panes > 1 { seg.append("\(k("s")) stack") }
+            if focus == .tiled { seg.append("\(k("c")) change") }
+            seg.append(done)
             return "PANE   " + seg.joined(separator: " · ")
         case .tab:
-            var seg = ["n new"]
-            if tabCount > 1 { seg.append("h/l prev/next") }
+            var seg = ["\(k("n")) new"]
+            if tabCount > 1 { seg.append("\(k("h"))/\(k("l")) prev/next") }
             if focus == .tiled || focus == .floating {
-                if tabCount > 1 { seg.append("⇧h/⇧l move to tab") }
-                seg.append("m move to #")
+                if tabCount > 1 { seg.append("\(k("⇧h"))/\(k("⇧l")) move to tab") }
+                seg.append("\(k("m")) move to #")
             }
-            seg.append("⏎/esc done")
+            seg.append(done)
             return "TAB   " + seg.joined(separator: " · ")
         case .resize:
             if focus != .tiled || panes <= 1 {
-                return "RESIZE   nothing to resize here · ⏎/esc done"
+                return "RESIZE   nothing to resize here · \(done)"
             }
-            return "RESIZE   h narrower · l wider · k taller · j shorter · ⏎/esc done"
+            return "RESIZE   \(k("h")) narrower · \(k("l")) wider · \(k("k")) taller · \(k("j")) shorter · \(done)"
         }
     }
 
@@ -309,9 +341,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The menu-bar pill text: the mode glyph plus the current tab position, so
     /// switching tabs is visible in the pill regardless of mode (▚ 2/3, ▚ T 2/3…).
     private func statusTitle(for mode: ModeEngine.Mode) -> String {
-        if isPaused { return "▚ ⏸" }
+        // Prefix a warning when Stage Manager is on (it fights tiling).
+        let warn = StageManager.isEnabled ? "⚠︎ " : ""
+        if isPaused { return "\(warn)▚ ⏸" }
         let tabs = tiling.tabSummary
-        return "\(mode.glyph) \(tabs.index + 1)/\(tabs.count)"
+        return "\(warn)\(mode.glyph) \(tabs.index + 1)/\(tabs.count)"
     }
 
     /// Register every global shortcut from the current binding set. Called at
@@ -386,7 +420,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let pid = app.processIdentifier
             MainActor.assumeIsolated {
                 self?.lastActiveAppPID = pid
-                // If the user switched (Cmd-Tab / third-party switcher) to a window
+                // Backstop the create-observer: adopt any of this app's unmanaged
+                // windows (in case its observer missed them), then…
+                self?.tiling.handleAppActivated(pid: pid)
+                // …if the user switched (Cmd-Tab / third-party switcher) to a window
                 // we manage in another tab, follow it there instead of letting it
                 // render over the current tab.
                 self?.tiling.revealTab(forActivatedApp: pid)

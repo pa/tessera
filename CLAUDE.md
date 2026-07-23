@@ -196,9 +196,20 @@ All six brief milestones are complete.
   apps are `kAXHidden`, and a managed app's *other* windows are parked
   off-screen (`kAXHidden` is app-level; per-window parking covers multi-window
   apps). Restored on Reset / quit.
-- **Layout enforcement** — a 0.6s timer re-snaps windows dragged/resized outside
-  Tessera and removes panes whose window was closed (BSP collapse → neighbor
-  fills).
+- **Layout management is fully event-driven — no polling.** `WindowObserver`
+  registers per-app/-window AX notifications: `kAXWindowCreated` (adopt),
+  `kAXUIElementDestroyed` (collapse the pane), and `kAXWindowMoved`/`Resized`
+  (user dragged/resized a tiled window outside Tessera → re-snap). There is **no
+  maintenance timer**; nothing runs when nothing changes (idle CPU ≈ 0). Two
+  supporting pieces: (1) a **debounce** — move/resize fire continuously during a
+  drag, so `handleWindowMovedOrResized` arms a one-shot ~0.18s timer and re-snaps
+  only once the drag settles (no mid-drag fighting/jitter); (2) a **suppression
+  window** — `beginProgrammaticLayout()` (called by `relayout`/`enforceLayout`)
+  ignores move/resize events for ~0.4s so Tessera's own frame writes don't
+  self-trigger a re-snap (and lazily-resizing apps like Chromium can settle).
+  Observer gaps (an attach race / flaky app) are backstopped on discrete events,
+  not a timer: observers re-attach on `didActivateApplication`, and
+  `handleAppActivated` adopts that app's unmanaged windows on activation.
 - **Follow-to-tab on app switch** — activating a managed window via Cmd-Tab or a
   third-party switcher switches to the tab that holds it (via
   `didActivateApplicationNotification` → `revealTab`), instead of letting macOS
@@ -214,8 +225,8 @@ All six brief milestones are complete.
   extension popups (reporting `AXUnknown` etc.); requiring a standard window
   keeps those popovers from being adopted and yanked into panes.
 - **Pause / Resume** (menu: "Pause Tessera") — temporarily disable window
-  management: `TilingController.suspend()` stops the maintenance loop and hands
-  every window back to macOS (unhide apps, un-park), `ModeEngine.setActive(false)`
+  management: `TilingController.suspend()` stops responding to window events and
+  hands every window back to macOS (unhide apps, un-park), `ModeEngine.setActive(false)`
   disables the event tap so mode chords fall through, and global hotkeys are
   unregistered. The layout is kept in memory; Resume re-applies it and restarts
   everything. The pill shows `▚ ⏸`; event-driven adopts (`handleWindowCreated`,
@@ -236,7 +247,8 @@ All six brief milestones are complete.
   detected via the `AXFullScreen` attribute or a frame covering ≥98% of the
   display (for HTML5 video fullscreen, which doesn't set `AXFullScreen`) and
   skipped by layout enforcement, so it isn't fought back into its pane. It
-  re-snaps on the first tick after exiting.
+  re-snaps when it resizes back down on exit (that resize fires the move/resize
+  observer).
 - **Floating panes** — toggle a window out of the BSP tree to float above the
   tiles (centered), move it freely with hjkl in Pane mode, and re-tile it.
   Floating windows are exempt from layout enforcement; they park/restore with
@@ -323,9 +335,13 @@ Window titles come from the **Accessibility** API (`kAXTitleAttribute` on each
 window element), not `CGWindowList`'s `kCGWindowName`. `kCGWindowName` is gated
 behind **Screen Recording** permission since macOS 10.15; AX titles need only
 the Accessibility grant Tessera already has. `AppCatalog` uses AX when trusted
-and falls back to `CGWindowList` (owner-name titles) otherwise. The private
-`_AXUIElementGetWindow` shim (in `PrivateAX.swift`) maps an AX window element to
-its `CGWindowID` for stable identity — the same symbol yabai/AeroSpace/Reef use.
+and falls back to `CGWindowList` (owner-name titles) otherwise. `PrivateAX`
+maps an AX window element to its `CGWindowID` for stable identity via the private
+`_AXUIElementGetWindow` symbol yabai/AeroSpace/Reef use — but resolved at
+**runtime with `dlsym`** (not `@_silgen_name` link-time binding), so if a future
+macOS drops the symbol Tessera degrades to a public-API fallback (match the AX
+window's frame + owner pid against `CGWindowList`) instead of failing to launch
+on an unresolved symbol.
 
 ## Gotchas
 

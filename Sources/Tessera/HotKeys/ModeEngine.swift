@@ -55,6 +55,10 @@ final class ModeEngine {
     /// so the HUD can re-evaluate which context keys still apply.
     var onAfterAction: (() -> Void)?
 
+    /// Fired with the pressed key (base char + shift) after an in-mode action, so
+    /// the HUD can flash which key was hit.
+    var onKeyFlash: ((String, Bool) -> Void)?
+
     private let tiling: TilingController
 
     /// While non-nil, Tab mode is capturing a tab-number to move the focused
@@ -180,10 +184,24 @@ final class ModeEngine {
         if chord == tabEntry { setMode(.tab); return true }
         if chord == resizeEntry { setMode(.resize); return true }
 
-        performModeKey(keyCode: keyCode, shift: event.flags.contains(.maskShift))
-        if mode != .normal { onAfterAction?() } // still in a mode → refresh its hints
+        let shift = event.flags.contains(.maskShift)
+        performModeKey(keyCode: keyCode, shift: shift)
+        if mode != .normal {
+            onAfterAction?()                                  // refresh contextual hints
+            if let ch = Self.keyChar(keyCode) { onKeyFlash?(ch, shift) } // then flash the key
+        }
         refreshTimeout()
         return true
+    }
+
+    /// The base character a mode key maps to, for the HUD flash (nil = ignore).
+    private static func keyChar(_ keyCode: Int) -> String? {
+        let map: [Int: String] = [
+            kVK_ANSI_R:"r", kVK_ANSI_D:"d", kVK_ANSI_C:"c", kVK_ANSI_F:"f", kVK_ANSI_W:"w",
+            kVK_ANSI_S:"s", kVK_ANSI_N:"n", kVK_ANSI_P:"p", kVK_ANSI_M:"m",
+            kVK_ANSI_H:"h", kVK_ANSI_J:"j", kVK_ANSI_K:"k", kVK_ANSI_L:"l",
+        ]
+        return map[keyCode]
     }
 
     private func performModeKey(keyCode: Int, shift: Bool) {

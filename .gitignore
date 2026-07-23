@@ -3,3 +3,6 @@
 *.xcodeproj
 DerivedData/
 .DS_Store
+
+# Private folder (nested repo) — never publish
+Personal/

@@ -94,8 +94,15 @@ final class TilingController {
 
     private var workspaceRect: CGRect { ScreenGeometry.mainUsableBounds }
 
-    /// Periodically re-snaps drifted windows and drops closed ones.
-    private var enforcementTimer: Timer?
+    /// One-shot timer that coalesces a burst of user move/resize events, so we
+    /// re-snap a dragged window only after the drag settles (no mid-drag fighting,
+    /// no jitter). Event-armed — not a poll; nothing fires when nothing moves.
+    private var resnapDebounce: Timer?
+    private let resnapDelay: TimeInterval = 0.18
+    /// Ignore user move/resize events until this time — set whenever Tessera
+    /// itself moves windows, so our own frame writes don't trigger a re-snap
+    /// (and lazily-resizing apps like Chromium can settle without a fight).
+    private var suppressEventsUntil = Date.distantPast
 
     /// New standard windows are always auto-added to the active tab.
     private let autoTileEnabled = true
@@ -166,39 +173,31 @@ final class TilingController {
         }
     }
 
-    // MARK: - Layout enforcement
+    // MARK: - Layout enforcement (fully event-driven — no polling)
 
-    private var idleTicks = 0
-    private let activeInterval: TimeInterval = 0.5
-    private let idleInterval: TimeInterval = 2.0
-
-    /// Start the maintenance loop (drops closed windows, adopts new ones,
-    /// re-snaps drifted ones). Self-reschedules at an adaptive interval: fast
-    /// while things are changing, slow when idle — cutting CPU when the layout
-    /// is quiet.
+    /// Seed the known-window set so existing windows aren't grabbed all at once
+    /// (only windows opened afterward auto-tile). No timer: adopt/close/drift are
+    /// all driven by `WindowObserver` AX notifications.
     func startEnforcing() {
-        // Seed the known-window set so existing windows aren't grabbed all at
-        // once; only windows opened after startup auto-tile.
         knownWindowIDs = allStandardWindowIDs()
-        scheduleTick(after: activeInterval)
     }
 
     /// True while paused — window management is suspended (no enforcement,
     /// auto-tile, or activation-follow), and windows are handed back to macOS.
     private(set) var isSuspended = false
 
-    /// Pause window management: stop the maintenance loop and bring every managed
-    /// window back on-screen (unhide apps, un-park), so macOS handles them
-    /// normally. The tab/pane layout is kept in memory for `resume()`.
+    /// Pause window management: bring every managed window back on-screen (unhide
+    /// apps, un-park) so macOS handles them normally. The layout is kept for
+    /// `resume()`. Event handlers no-op while suspended.
     func suspend() {
         guard !isSuspended else { return }
         isSuspended = true
-        enforcementTimer?.invalidate()
-        enforcementTimer = nil
+        resnapDebounce?.invalidate()
+        resnapDebounce = nil
         restoreAllWindowsOnScreen()
     }
 
-    /// Resume window management: re-apply the current layout and restart the loop.
+    /// Resume window management: re-apply the current layout.
     func resume() {
         guard isSuspended else { return }
         isSuspended = false
@@ -208,31 +207,48 @@ final class TilingController {
         startEnforcing()
     }
 
-    private func scheduleTick(after interval: TimeInterval) {
-        enforcementTimer?.invalidate()
-        enforcementTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+    // MARK: - Event handlers (from WindowObserver)
+
+    /// Mark that Tessera is about to move/resize windows, so the move/resize
+    /// events those writes generate are ignored (no self-triggered re-snap). The
+    /// window is generous enough for lazily-resizing apps (Chromium) to settle.
+    private func beginProgrammaticLayout() {
+        suppressEventsUntil = Date().addingTimeInterval(0.4)
+    }
+
+    /// The focused window changed (user clicked into a window). If it's a tiled
+    /// window in the active tab, make its pane the focused one — so a new window
+    /// splits from where the user actually is (not a stale pane). An unmanaged
+    /// window (e.g. a just-opened one before adoption) is ignored, which is what
+    /// keeps the split originating from the *previously* focused pane.
+    func handleFocusedWindowChanged(_ pid: pid_t, _ window: AXWindow) {
+        guard !isSuspended, pendingPane == nil, let id = window.windowID else { return }
+        if let pane = occupants.first(where: { $0.value.window.windowID == id })?.key {
+            focusedPane = pane
         }
     }
 
-    private func tick() {
-        let didWork = maintainLayout()
-        idleTicks = didWork ? 0 : min(idleTicks + 1, 6)
-        scheduleTick(after: idleTicks >= 3 ? idleInterval : activeInterval)
+    /// A window was destroyed (closed) — collapse its pane immediately. Cheap:
+    /// only touches managed windows, no-ops if the closed window wasn't ours.
+    func handleWindowDestroyed() {
+        guard !isSuspended, pendingPane == nil else { return }
+        removeClosedWindows()
     }
 
-    @discardableResult
-    private func maintainLayout() -> Bool {
-        guard pendingPane == nil else { return false } // don't disturb a split-in-progress
-        var acted = removeClosedWindows()
-        if autoTileEnabled { acted = autoTileNewWindows() || acted }
-        acted = enforceLayout() || acted
-        return acted
+    /// The user moved or resized a window outside Tessera. Fires continuously
+    /// during a drag, so debounce: re-snap only once the drag settles. Events
+    /// caused by Tessera's own frame writes are ignored (suppression window).
+    func handleWindowMovedOrResized(_ window: AXWindow) {
+        guard !isSuspended, pendingPane == nil, Date() >= suppressEventsUntil else { return }
+        // Only care about windows we manage in the active tab.
+        guard let id = window.windowID, occupants.values.contains(where: { $0.window.windowID == id })
+        else { return }
+        resnapDebounce?.invalidate()
+        resnapDebounce = Timer.scheduledTimer(withTimeInterval: resnapDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.enforceLayout() }
+        }
     }
 
-    /// Adopt a just-created window into the active tab, if auto-tiling is on and
-    /// the window is a new, tileable, unmanaged one. Driven by `WindowObserver`
-    /// (`kAXWindowCreated`) so it happens the instant the window appears.
     func handleWindowCreated(pid: pid_t, window: AXWindow) {
         guard !isSuspended, autoTileEnabled, pendingPane == nil,
               window.isTileable, let id = window.windowID,
@@ -256,35 +272,28 @@ final class TilingController {
         return ids
     }
 
-    /// Adopt any newly-opened standard window into the active tab (splitting the
-    /// focused pane). Window-based, so different windows of one app can live in
-    /// different tabs.
-    @discardableResult
-    private func autoTileNewWindows() -> Bool {
+    /// An app was activated (Cmd-Tab / click / launch). Adopt any of *that app's*
+    /// unmanaged, tileable windows into the active tab — a cheap, event-driven
+    /// backstop for the rare case where its `kAXWindowCreated` observer didn't
+    /// fire (attach race / flaky app). Window-based, so one app's windows can
+    /// live in different tabs.
+    func handleAppActivated(pid: pid_t) {
+        guard !isSuspended, autoTileEnabled, pendingPane == nil else { return }
         let managed = occupiedWindowIDs()
-        var current = Set<CGWindowID>()
         var addedAny = false
-
-        for app in AppTargeter.regularApps() {
-            let appElement = AXUIElementCreateApplication(app.processIdentifier)
-            for window in AppTargeter.windows(of: appElement) where window.isTileable {
-                guard let id = window.windowID else { continue }
-                current.insert(id)
-                if !knownWindowIDs.contains(id) && !managed.contains(id) {
-                    addToLayout(WindowRef(pid: app.processIdentifier, window: window))
-                    addedAny = true
-                }
-            }
+        for window in AppTargeter.windows(of: AXUIElementCreateApplication(pid)) where window.isTileable {
+            guard let id = window.windowID,
+                  !knownWindowIDs.contains(id), !managed.contains(id) else { continue }
+            knownWindowIDs.insert(id)
+            addToLayout(WindowRef(pid: pid, window: window))
+            addedAny = true
         }
-        knownWindowIDs = current
-
         if addedAny {
             relayout()
             if let ref = occupants[focusedPane] { focus(ref) }
             applyWorkspaceVisibility()
             onWorkspaceChange?()
         }
-        return addedAny
     }
 
     /// Drop panes whose window was closed; the BSP tree collapses so the
@@ -328,6 +337,7 @@ final class TilingController {
     /// any window was re-snapped (so the loop knows something changed).
     @discardableResult
     private func enforceLayout() -> Bool {
+        beginProgrammaticLayout()
         // Stacked windows all target the same full-screen rect; re-snapping every
         // tick fights apps that clamp their size (flicker). Positioning happens
         // on toggle/cycle instead.
@@ -343,21 +353,22 @@ final class TilingController {
         var snapped = false
         for (pane, ref) in occupants {
             guard let expected = frames[pane], let current = ref.window.frame else { continue }
-            // Don't fight a fullscreen window (native or HTML5 video) back into its
-            // pane. It re-snaps naturally on the first tick after it exits.
+            // Fast path: a window already at its frame needs nothing — skip before
+            // the extra `isFullscreen` AX read (this is the common case each tick).
+            if current.approximatelyEqual(to: expected, tolerance: 8) { continue }
+            // Drifted — but don't fight a fullscreen window (native or HTML5 video)
+            // back into its pane; it re-snaps on the first tick after it exits.
             if isFullscreenLike(ref.window, frame: current) { continue }
-            if !current.approximatelyEqual(to: expected, tolerance: 8) {
-                ref.window.setFrame(expected)
-                snapped = true
-            }
+            ref.window.setFrame(expected)
+            snapped = true
         }
         return snapped
     }
 
     /// Unhide every app and bring all managed windows back on-screen — for quit.
     func teardown() {
-        enforcementTimer?.invalidate()
-        enforcementTimer = nil
+        resnapDebounce?.invalidate()
+        resnapDebounce = nil
         for tab in tabs {
             let frames = tab.tree.frames(in: workspaceRect, config: config)
             for (pane, ref) in tab.occupants {
@@ -1386,6 +1397,7 @@ final class TilingController {
     /// Snap every occupied pane's window to its computed frame — or, when a pane
     /// is zoomed, fill the workspace with it and park the rest off-screen.
     private func relayout() {
+        beginProgrammaticLayout()
         if tabs[activeTabIndex].stacked {
             for (_, ref) in occupants { ref.window.setFrame(zoomFrame) }
             if let ref = occupants[focusedPane] { ref.window.raise() }

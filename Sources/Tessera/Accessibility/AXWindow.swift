@@ -42,8 +42,7 @@ struct AXWindow {
     /// The window's `CGWindowID`, via the private AX bridge, for correlating
     /// with `CGWindowList`. Nil if the element isn't a real on-screen window.
     var windowID: CGWindowID? {
-        var wid = CGWindowID(0)
-        return _AXUIElementGetWindow(element, &wid) == .success ? wid : nil
+        PrivateAX.windowID(of: element)
     }
 
     /// False once the underlying window has been closed (the AX element goes

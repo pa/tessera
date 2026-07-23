@@ -12,6 +12,13 @@
   </p>
 </div>
 
+<p align="center">
+  <a href="https://pa.github.io/tessera/">
+    <img src="assets/demo.gif" width="760" alt="Tessera demo — tiling, tabs, and modal keys">
+  </a>
+  <br><sub><strong>▶ <a href="https://pa.github.io/tessera/">Watch the full demo</a></strong> — tiling, tabs, and modal keys in action</sub>
+</p>
+
 Tessera brings terminal-multiplexer ergonomics — **tabs, splits, panes, a command
 palette, modal keys** — to *arbitrary* GUI apps by puppeting their windows through
 the macOS Accessibility API. It's a menu-bar agent (look for the `▚` glyph); no
@@ -28,8 +35,7 @@ brew services start tessera        # run now + at login
 ```
 
 Then grant **System Settings → Privacy & Security → Accessibility → Tessera**
-(the menu has a one-click shortcut). The grant survives every `brew upgrade` —
-Tessera self-signs with a per-user cert so its identity stays stable.
+(the menu has a one-click shortcut), and keep **Stage Manager off**.
 
 > Keep **Stage Manager off** (it hides inactive apps' windows and fights every
 > macOS tiling WM).
