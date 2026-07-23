@@ -1,0 +1,89 @@
+name: Release
+
+# Fully automated release: push a tag `vX.Y.Z` and everything else happens —
+# the GitHub Release is created, a prebuilt bottle is built + uploaded, and the
+# formula (source url+sha AND the bottle block) is committed to the tap repo
+# (pa/homebrew-tessera) and mirrored into this repo. No hand-edits per release.
+#
+# Requires one repo secret: TAP_TOKEN — a PAT (fine-grained, Contents: write on
+# pa/homebrew-tessera) so CI can push the formula to the tap.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)release, e.g. v0.1.2"
+        required: true
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15 # arm64 Sequoia — the minimum supported macOS
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: pa/homebrew-tessera
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
+
+      - name: Git identity
+        run: |
+          git config --global user.name "pa"
+          git config --global user.email "44371915+pa@users.noreply.github.com"
+
+      - name: Select newest Xcode (needs Swift 6)
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -n1)"
+
+      - name: Point formula at this tag's source + strip old bottle
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+          SRC_SHA="$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')"
+          python3 scripts/formula_update.py tap/Formula/tessera.rb --url "$URL" --sha "$SRC_SHA" --strip-bottle
+          cp tap/Formula/tessera.rb Formula/tessera.rb
+          ( cd tap && git add Formula/tessera.rb && git commit -m "Release ${TAG}: source url + sha" && git push )
+
+      - name: Ensure GitHub Release exists
+        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Tessera ${TAG}" --generate-notes
+
+      - name: Build + bottle
+        run: |
+          set -euo pipefail
+          brew tap pa/tessera
+          brew trust pa/tessera || true
+          brew install --build-bottle --verbose tessera
+          brew bottle --json --no-rebuild --root-url="https://github.com/${REPO}/releases/download/${TAG}" tessera
+          for f in tessera--*.bottle.tar.gz; do mv "$f" "${f/tessera--/tessera-}"; done
+          ls -la tessera-*.bottle.tar.gz *.json
+
+      - name: Upload bottle to the release
+        run: gh release upload "$TAG" tessera-*.bottle.tar.gz --clobber --repo "$REPO"
+
+      - name: Commit the bottle block (tap + main)
+        run: |
+          set -euo pipefail
+          JSON="$(ls *.json | head -n1)"
+          python3 scripts/formula_update.py tap/Formula/tessera.rb \
+            --bottle-json "$JSON" --root-url "https://github.com/${REPO}/releases/download/${TAG}"
+          cp tap/Formula/tessera.rb Formula/tessera.rb
+          ( cd tap && git add Formula/tessera.rb && git commit -m "Release ${TAG}: arm64_sequoia bottle" && git push )
+          git add Formula/tessera.rb && git commit -m "Release ${TAG}: formula (source + bottle)" && git push origin HEAD:${{ github.event.repository.default_branch }}
