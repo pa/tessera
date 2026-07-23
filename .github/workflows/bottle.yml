@@ -1,0 +1,83 @@
+name: Build Homebrew bottles
+
+# Builds prebuilt binaries ("bottles") so `brew install tessera` downloads a
+# ready binary in seconds instead of compiling from source. Bottles contain only
+# the compiled binary — no docs, no demo media.
+#
+# Trigger it after publishing a release (or manually), pointing at the release
+# tag. It uploads a bottle per macOS/arch to that release and prints the
+# `bottle do` block to paste into the formula (Formula/tessera.rb in this repo
+# and the tap repo pa/homebrew-tessera).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build bottles for (e.g. v0.1.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  bottle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14   # arm64, Sonoma
+          - os: macos-15   # arm64, Sequoia
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Tap + build bottle
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          ROOT_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          brew tap pa/tessera
+          brew trust pa/tessera || true
+          brew install --build-bottle --verbose tessera
+          brew bottle --json --no-rebuild --root-url="${ROOT_URL}" tessera
+          # brew writes files with a double dash; Homebrew's download convention
+          # is a single dash — rename so the URL in the bottle block resolves.
+          for f in tessera--*.bottle.tar.gz; do
+            mv "$f" "${f/tessera--/tessera-}"
+          done
+          ls -la tessera-*.bottle.tar.gz *.json
+
+      - name: Upload bottle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          gh release upload "${TAG}" tessera-*.bottle.tar.gz --clobber --repo "${{ github.repository }}"
+
+      - name: Emit bottle DSL
+        run: |
+          echo "### Bottle DSL for ${{ matrix.os }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```ruby' >> "$GITHUB_STEP_SUMMARY"
+          # The JSON contains the sha256 + tag (e.g. arm64_sonoma) for the bottle.
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, json
+          j = json.load(open(glob.glob("*.json")[0]))
+          for _, info in j.items():
+              for tag, b in info["bottle"]["tags"].items():
+                  print(f'    sha256 cellar: :any_skip_relocation, {tag}: "{b["sha256"]}"')
+          PY
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload bottle JSON artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottle-json-${{ matrix.os }}
+          path: "*.json"
