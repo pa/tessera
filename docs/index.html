@@ -53,8 +53,6 @@
   .btn-ghost{ background:transparent; border-color:var(--line); color:var(--fg); }
   .btn-ghost:hover{ border-color:var(--accent); color:var(--accent); }
   .btn svg{ width:15px; height:15px; fill:currentColor; }
-  .star-count{ display:none; padding:1px 8px; border-radius:999px; border:1px solid var(--line);
-    font-size:12.5px; font-variant-numeric:tabular-nums; color:var(--muted); } .star-count.show{ display:inline-block; }
 
   .code{ position:relative; border:1px solid var(--line); border-radius:10px; background:var(--panel); margin:24px 0 0; }
   .code pre{ margin:0; padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.85; color:var(--fg); }
@@ -114,7 +112,7 @@
       <a class="btn btn-primary" href="#install">Install</a>
       <a class="btn btn-ghost" id="starBtn" data-repo="pa/tessera" href="https://github.com/pa/tessera" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
-        Star on GitHub <span class="star-count" id="starCount"></span>
+        Star on GitHub
       </a>
     </div>
 
@@ -241,17 +239,6 @@
         });
       });
     });
-  })();
-
-  // Live star count (best-effort).
-  (function () {
-    var btn = document.getElementById('starBtn'), el = document.getElementById('starCount');
-    if (!btn || !el) return;
-    fetch('https://api.github.com/repos/' + btn.getAttribute('data-repo'), { headers: { Accept: 'application/vnd.github+json' } })
-      .then(function (r){ return r.ok ? r.json() : null; })
-      .then(function (d){ if (!d || typeof d.stargazers_count !== 'number') return;
-        var n = d.stargazers_count; el.textContent = n>=1000 ? (n/1000).toFixed(1)+'k' : String(n); el.classList.add('show'); })
-      .catch(function () {});
   })();
 
   // Scroll reveal (fail-safe: reveals all after 2.5s).

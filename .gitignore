@@ -6,3 +6,6 @@ DerivedData/
 
 # Private folder (nested repo) — never publish
 Personal/
+
+# Remotion promo project (local build tool)
+promo/
