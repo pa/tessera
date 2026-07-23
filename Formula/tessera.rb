@@ -21,8 +21,8 @@ class Tessera < Formula
   # Stable release (so `brew install tessera` works without --HEAD). To ship a
   # new version: push a new tag, then bump `url` + `sha256` (the checksum of the
   # tag's source tarball: `curl -sL <url> | shasum -a 256`).
-  url "https://github.com/pa/tessera/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "e250de5f48edac3d2252d9502808b947eda4672107c9b5383531b707dadadce3"
+  url "https://github.com/pa/tessera/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "55228bc45431dae1320a49afe6fa7f803149afa37c812584df044a924d7b9552"
   head "https://github.com/pa/tessera.git", branch: "main"
 
   # Needs only the Swift toolchain from the Xcode Command Line Tools, which
