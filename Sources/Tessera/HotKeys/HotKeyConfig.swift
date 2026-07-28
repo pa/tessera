@@ -10,6 +10,7 @@ enum TilingCommand: String, CaseIterable, Codable {
     case reset
     case palette
     case navigator
+    case togglePause
     case enterPaneMode, enterTabMode, enterResizeMode
 
     var title: String {
@@ -30,6 +31,7 @@ enum TilingCommand: String, CaseIterable, Codable {
         case .reset: return "Reset Tiling"
         case .palette: return "Command Palette"
         case .navigator: return "Workspace Navigator"
+        case .togglePause: return "Pause / Resume Tessera"
         case .enterPaneMode: return "Enter Pane Mode"
         case .enterTabMode: return "Enter Tab Mode"
         case .enterResizeMode: return "Enter Resize Mode"
@@ -47,7 +49,7 @@ enum TilingCommand: String, CaseIterable, Codable {
          .focusLeft, .focusDown, .focusUp, .focusRight,
          .moveLeft, .moveDown, .moveUp, .moveRight,
          .newTab, .nextTab, .previousTab,
-         .palette, .navigator, .reset]
+         .palette, .navigator, .togglePause, .reset]
     }
 }
 
@@ -87,7 +89,8 @@ struct KeyBindingSet: Codable, Equatable {
         base: [.control, .option, .command],
         baseKeys: [.splitRight: kVK_ANSI_R, .splitDown: kVK_ANSI_D,
                    .newTab: kVK_ANSI_T, .nextTab: kVK_ANSI_RightBracket,
-                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_Delete].merging(focusKeys) { a, _ in a }
+                   .previousTab: kVK_ANSI_LeftBracket, .reset: kVK_Delete,
+                   .togglePause: kVK_ANSI_P].merging(focusKeys) { a, _ in a }
     ))
 
     /// Bind `baseKeys` at `base` modifiers and the shared move keys at

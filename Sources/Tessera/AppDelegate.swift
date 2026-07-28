@@ -159,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
         // Pause hands windows back to macOS and lets shortcuts fall through.
-        let pause = NSMenuItem(title: isPaused ? "Resume Tessera" : "Pause Tessera",
+        let pause = NSMenuItem(title: (isPaused ? "Resume Tessera" : "Pause Tessera") + chordSuffix(.togglePause),
                                action: #selector(togglePause), keyEquivalent: "")
         pause.target = self
         pause.isEnabled = trusted
@@ -246,7 +246,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePause() {
         isPaused.toggle()
         if isPaused {
+            // Drop every chord so they fall through to apps — except the
+            // pause chord itself, which has to survive or there's no way back
+            // from the keyboard.
             hotKeys.unregisterAll()
+            registerPauseChordOnly()
             modeEngine.setActive(false)
             tiling.suspend()
         } else {
@@ -255,6 +259,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tiling.resume()
         }
         refreshStatusIndicator()
+    }
+
+    /// The one chord that stays live while suspended: Pause / Resume.
+    private func registerPauseChordOnly() {
+        guard let binding = bindingSet.bindings[.togglePause] else { return }
+        hotKeys.register(keyCode: binding.keyCode,
+                         modifiers: HotKeyManager.Modifiers(rawValue: binding.modifiers)) { [weak self] in
+            self?.togglePause()
+        }
     }
 
     /// Reflect the active input mode in the menu-bar glyph and the HUD hint bar.
@@ -357,7 +370,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let modifiers = HotKeyManager.Modifiers(rawValue: binding.modifiers)
             let run = action(for: command)
             hotKeys.register(keyCode: binding.keyCode, modifiers: modifiers) { [weak self] in
-                guard self?.isPaused != true else { return } // no tiling while paused
+                // No tiling while paused — but Pause/Resume must always fire.
+                guard command == .togglePause || self?.isPaused != true else { return }
                 run()
             }
         }
@@ -393,6 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .reset: return { [weak self] in self?.tiling.reset() }
         case .palette: return { [weak self] in self?.openCommandPalette() }
         case .navigator: return { [weak self] in self?.openNavigator() }
+        case .togglePause: return { [weak self] in self?.togglePause() }
         // Mode-entry is handled by the event tap, never registered here.
         case .enterPaneMode, .enterTabMode, .enterResizeMode: return {}
         }

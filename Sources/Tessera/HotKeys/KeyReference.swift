@@ -44,6 +44,7 @@ enum KeyReference {
         ("New tab · next / previous tab", [.newTab, .nextTab, .previousTab]),
         ("Command palette", [.palette]),
         ("Workspace navigator", [.navigator]),
+        ("Pause / resume Tessera (stays live while paused)", [.togglePause]),
         ("Reset tiling (un-manage everything)", [.reset]),
     ]
 
