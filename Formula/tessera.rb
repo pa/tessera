@@ -21,14 +21,15 @@ class Tessera < Formula
   # Stable release (so `brew install tessera` works without --HEAD). To ship a
   # new version: push a new tag, then bump `url` + `sha256` (the checksum of the
   # tag's source tarball: `curl -sL <url> | shasum -a 256`).
-  url "https://github.com/pa/tessera/archive/refs/tags/v0.1.2.tar.gz"
-  sha256 "e0e2ec3229c34dfab55b91ddb2b3c3a93d26a91d49d694c07448d77cba836e38"
+  url "https://github.com/pa/tessera/archive/refs/tags/v0.1.3.tar.gz"
+  sha256 "a774092073aa7a0fdb775aa6bb6d2a603eee929a69b16d619e34f819a0dd56a1"
   head "https://github.com/pa/tessera.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/pa/tessera/releases/download/v0.1.2"
-    sha256 cellar: :any_skip_relocation, arm64_sequoia: "4455e57ae97767b1d5f3f0fadeac8d2cf9f57285c6d9400f2248b3a7cc93c49f"
+    root_url "https://github.com/pa/tessera/releases/download/v0.1.3"
+    sha256 cellar: :any_skip_relocation, arm64_sequoia: "e5fe2f737a3b5f44aec3d4fc3110eddcc00ed2127d63aaadefe213ee8d00897d"
   end
+
 
   # Needs only the Swift toolchain from the Xcode Command Line Tools, which
   # Homebrew itself installs — so no extra tools beyond `brew`. (Deliberately
