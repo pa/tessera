@@ -61,6 +61,27 @@ inactive apps' windows and fights every macOS tiling WM).
 - **Organize by app** — one keystroke lays every open window out as one tab per app.
 - **Works with stubborn apps** — disables `AXEnhancedUserInterface` around resizes so Chromium/Electron apps (Brave, VS Code, Slack) actually tile.
 
+## Not yet / known limits
+
+Stated up front so nothing surprises you after install:
+
+- **Multi-monitor is not supported yet.** Tessera manages the **main display
+  only** — every layout, tab and pane is computed from the main display's bounds.
+  On a multi-display setup a second monitor is not tiled independently, and a
+  window that gets adopted from another display will be pulled onto the main one.
+  This is the next thing on the roadmap; until then `⌃⌥⌘P` (Pause) hands every
+  window straight back to macOS if you need the other screen.
+- **Apps with a minimum window size overflow their pane.** A pure-Accessibility
+  window manager cannot force an app below the size it will accept — only
+  SIP-disabled approaches can. Tessera anchors such a window at its pane origin
+  and lets it overflow rather than faking a fit. Manual float (`w` in Pane mode)
+  is the escape hatch.
+- **Stage Manager must be off** — it hides inactive apps' windows and fights any
+  macOS tiling WM. Tessera detects it and warns in the menu bar.
+- **macOS 15+ and Apple silicon.** That's what's verified and what the prebuilt
+  bottle targets; older versions compile but are untested.
+- **No IPC/CLI yet** (`send-cmd`, `query state --json`) — also on the roadmap.
+
 ## Quick start
 
 Default prefix is **`⌃⌥⌘`** (Control-Option-Command). A few to get going:

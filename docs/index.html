@@ -225,6 +225,37 @@
       width applied to the outer margin and the gaps between panes, live.</p>
   </section>
 
+  <section>
+    <div class="seclabel"><b>05</b> &nbsp;/&nbsp; Not yet</div>
+    <h2>What Tessera doesn't do.</h2>
+    <p class="lead">Stated up front, so nothing surprises you after install.</p>
+    <div class="flist">
+      <div class="frow">
+        <div class="ft"><span class="n">—</span>Multi-monitor</div>
+        <div class="fd">Not supported yet. Tessera manages the <strong>main display only</strong> — every
+          layout, tab and pane is computed from its bounds. A second monitor isn't tiled independently,
+          and a window adopted from another display is pulled onto the main one. Next on the roadmap;
+          until then <kbd>⌃⌥⌘P</kbd> hands every window back to macOS.</div>
+      </div>
+      <div class="frow">
+        <div class="ft"><span class="n">—</span>Apps with a minimum size</div>
+        <div class="fd">A pure-Accessibility window manager can't force an app smaller than it will
+          accept — only SIP-disabled approaches can. Such a window is anchored at its pane origin and
+          allowed to overflow rather than faking a fit; <kbd>w</kbd> floats it instead.</div>
+      </div>
+      <div class="frow">
+        <div class="ft"><span class="n">—</span>Stage Manager</div>
+        <div class="fd">Must be off — it hides inactive apps' windows and fights any macOS tiling
+          manager. Tessera detects it and warns in the menu bar.</div>
+      </div>
+      <div class="frow">
+        <div class="ft"><span class="n">—</span>IPC / CLI</div>
+        <div class="fd">No <code>send-cmd</code> or <code>query state --json</code> yet, so it isn't
+          scriptable from outside. On the roadmap.</div>
+      </div>
+    </div>
+  </section>
+
   <footer>
     <span><span class="glyph">▚</span> Tessera — Swift + AppKit + the Accessibility API.</span>
     <span><a href="https://github.com/pa/tessera">GitHub ↗</a> &nbsp;·&nbsp; MIT License</span>
