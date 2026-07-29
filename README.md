@@ -30,13 +30,14 @@ Install via Homebrew:
 
 ```sh
 brew tap pa/tessera
+brew trust pa/tessera              # required once: Homebrew gates 3rd-party taps
 brew install tessera
 brew services start tessera        # run now + at login
 ```
 
-> If Homebrew refuses to load the formula from an *"untrusted tap"*, run
-> `brew trust pa/tessera` once (a Homebrew security step for third-party taps —
-> it can't be pre-approved for you), then re-run `brew install tessera`.
+> `brew trust` is a one-time consent step Homebrew requires for any third-party
+> tap — it can't be pre-approved on your behalf. Without it `brew install` stops
+> with *"Refusing to load formula … from untrusted tap"*.
 
 Then grant **System Settings → Privacy & Security → Accessibility → Tessera**
 (the menu has a one-click shortcut), and keep **Stage Manager off** (it hides

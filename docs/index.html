@@ -118,7 +118,7 @@
 
     <figure class="reveal">
       <div class="demo-screen">
-        <video controls autoplay muted loop playsinline preload="metadata" poster="demo-poster.png"><source src="demo.mp4" type="video/mp4"></video>
+        <video controls autoplay muted loop playsinline preload="metadata" poster="demo-poster.webp"><source src="demo.mp4" type="video/mp4"></video>
         <div class="demo-ph"><div class="play"></div>Loading demo…</div>
       </div>
       <figcaption>Fig. 01 &nbsp;|&nbsp; <b>Split → tab → move → stack, from the keyboard</b></figcaption>
@@ -130,12 +130,13 @@
     <h2>Install via Homebrew.</h2>
     <p class="lead">A single command sets up the tap and the background agent.</p>
     <div class="code">
-      <button class="copy" data-copy="brew tap pa/tessera&#10;brew install tessera&#10;brew services start tessera">COPY</button>
+      <button class="copy" data-copy="brew tap pa/tessera&#10;brew trust pa/tessera&#10;brew install tessera&#10;brew services start tessera">COPY</button>
       <pre><span class="prompt">$ </span>brew tap pa/tessera
+<span class="prompt">$ </span>brew trust pa/tessera
 <span class="prompt">$ </span>brew install tessera
 <span class="prompt">$ </span>brew services start tessera</pre>
     </div>
-    <p class="lead" style="margin-top:16px">If Homebrew refuses an <em>untrusted tap</em>, run <code>brew trust pa/tessera</code> once, then re-run the install.
+    <p class="lead" style="margin-top:16px"><code>brew trust</code> is a one-time consent step Homebrew requires for any third-party tap; without it the install stops with <em>“untrusted tap”</em>.
       Then grant <strong>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security → Accessibility → Tessera</strong>,
       and keep <strong>Stage Manager off</strong>. It's a menu-bar agent — look for the <span class="glyph">▚</span> glyph (no Dock/Applications icon).</p>
   </section>
