@@ -62,8 +62,40 @@ jobs:
           cp tap/Formula/tessera.rb Formula/tessera.rb
           ( cd tap && git add Formula/tessera.rb && git commit -m "Release ${TAG}: source url + sha" && git push )
 
+      # Notes are composed from the commit range, not --generate-notes: that
+      # builds its list from merged pull requests, and this repo pushes straight
+      # to main, so it produced an empty body with only a compare link.
       - name: Ensure GitHub Release exists
-        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Tessera ${TAG}" --generate-notes
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release already exists"; exit 0
+          fi
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          {
+            if [ -n "$PREV" ]; then
+              echo "## Changes since ${PREV}"
+              echo
+              git log --no-merges --pretty='- %s' "${PREV}..${TAG}"
+              echo
+              echo "**Full Changelog**: https://github.com/${REPO}/compare/${PREV}...${TAG}"
+            else
+              echo "First tagged release."
+            fi
+            echo
+            echo '## Install'
+            echo
+            echo '```sh'
+            echo 'brew tap pa/tessera'
+            echo 'brew trust pa/tessera   # one-time: Homebrew gates third-party taps'
+            echo 'brew install tessera'
+            echo 'brew services start tessera'
+            echo '```'
+            echo
+            echo 'Then grant **System Settings → Privacy & Security → Accessibility → Tessera**, and keep **Stage Manager off**.'
+            echo 'Requires macOS 15+. See [the docs](https://pa.github.io/tessera/).'
+          } > "${RUNNER_TEMP}/notes.md"
+          gh release create "$TAG" --title "Tessera ${TAG}" --notes-file "${RUNNER_TEMP}/notes.md"
 
       - name: Build + bottle
         run: |
