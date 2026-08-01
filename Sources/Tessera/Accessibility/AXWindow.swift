@@ -135,10 +135,13 @@ struct AXWindow {
         return AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, value)
     }
 
-    /// Set both position and size to the given frame. Position is set first so a
-    /// window that's being grown doesn't briefly clip off-screen. Returns the
-    /// resulting frame after the app has had its say (which may differ from the
-    /// request if the app enforces a minimum size).
+    /// Set both position and size to the given frame. Normally position is set
+    /// first so a window that's being grown doesn't briefly clip off-screen.
+    /// When restoring a parked window, resize it while it is still off-screen,
+    /// then move it into view; this avoids a one-frame flash of its old (often
+    /// full-screen) size during a workspace switch. Returns the resulting frame
+    /// after the app has had its say (which may differ from the request if the
+    /// app enforces a minimum size).
     ///
     /// Wrapped in an `AXEnhancedUserInterface` toggle: apps built on
     /// Chromium/Electron (Brave, Chrome, VS Code, Slack…) set that app-level
@@ -148,7 +151,7 @@ struct AXWindow {
     /// apply synchronously, then we restore it. Same undocumented trick as
     /// yabai / Rectangle / AeroSpace; needs no SIP.
     @discardableResult
-    func setFrame(_ rect: CGRect) -> CGRect? {
+    func setFrame(_ rect: CGRect, resizeBeforePosition: Bool = false) -> CGRect? {
         let app = appElement()
         var restoreEnhancedUI = false
         if let app, boolAttribute(app, "AXEnhancedUserInterface") == true {
@@ -160,11 +163,18 @@ struct AXWindow {
                 AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
             }
         }
-        setPosition(rect.origin)
-        setSize(rect.size)
-        // Re-set position: growing a window can shift its origin, so a second
-        // position write pins the top-left corner where we asked for it.
-        setPosition(rect.origin)
+        if resizeBeforePosition {
+            // The window is parked off-screen, so size it there before it can
+            // become visible at its destination.
+            setSize(rect.size)
+            setPosition(rect.origin)
+        } else {
+            setPosition(rect.origin)
+            setSize(rect.size)
+            // Re-set position: growing a window can shift its origin, so a
+            // second position write pins the top-left corner where we asked.
+            setPosition(rect.origin)
+        }
         return frame
     }
 

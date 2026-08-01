@@ -1348,10 +1348,12 @@ final class TilingController {
         window.setPosition(offscreenPoint)
     }
 
-    /// Bring a parked window back to its frame.
+    /// Bring a parked window back to its frame. Resize while it remains
+    /// off-screen, then move it in, so its old full-size frame cannot flash
+    /// over the workspace during a tab switch.
     private func unpark(_ window: AXWindow, to frame: CGRect) {
         if window.isMinimized { window.setMinimized(false) } // defensive
-        window.setFrame(frame)
+        window.setFrame(frame, resizeBeforePosition: true)
     }
 
     /// Park a tab's windows (tiled and floating) off-screen. Captures each
