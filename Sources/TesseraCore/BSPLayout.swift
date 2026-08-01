@@ -191,10 +191,11 @@ public indirect enum BSPNode: Sendable, Codable {
         }
     }
 
-    /// Rebalance so every leaf pane ends up the same size: each split's ratio is
-    /// set to the fraction of leaves in its first subtree (so a split feeding a
-    /// 2-leaf subtree and a 1-leaf subtree gets ratio 2/3). Equivalent to
-    /// AeroSpace's "balance-sizes".
+    /// Rebalance split ratios by descendant leaf count: each split's ratio is
+    /// the fraction of leaves in its first subtree (so a split feeding a
+    /// 2-leaf subtree and a 1-leaf subtree gets ratio 2/3). This gives equal
+    /// pane area for gap-free mixed-orientation trees and equal extents for
+    /// same-orientation trees.
     public func balanced() -> BSPNode {
         switch self {
         case .leaf:

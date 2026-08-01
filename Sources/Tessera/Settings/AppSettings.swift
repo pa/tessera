@@ -7,7 +7,9 @@ struct AppSettings: Codable, Equatable {
     /// margin and the gaps between panes. 0 = flush tiles.
     var paddingPercent: Double
 
+
     static let `default` = AppSettings(paddingPercent: 1.0)
+
 
     /// Clamp to a sane range so a bad value can't produce absurd gaps.
     static let paddingRange: ClosedRange<Double> = 0...5

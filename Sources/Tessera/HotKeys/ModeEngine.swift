@@ -209,6 +209,12 @@ final class ModeEngine {
         case .normal:
             break
         case .pane:
+            // 1–9 jump straight to that pane (tmux display-panes style). Works
+            // stacked too, where directional keys have no geometry to use.
+            if let n = Self.digit(for: keyCode), n >= 1 {
+                tiling.focusPane(number: n)
+                return
+            }
             switch keyCode {
             case kVK_ANSI_R: exitAndRun { $0.split(.horizontal) }
             case kVK_ANSI_D: exitAndRun { $0.split(.vertical) }
@@ -226,6 +232,12 @@ final class ModeEngine {
             default: break // swallowed
             }
         case .tab:
+            // Bare 1–9 switches to that tab. (`m` + digits still *moves* the
+            // focused window to a tab — that path is captured before we get here.)
+            if let n = Self.digit(for: keyCode), n >= 1 {
+                tiling.selectTab(number: n)
+                return
+            }
             switch keyCode {
             case kVK_ANSI_N: exitAndRun { $0.newTab() } // opens the palette → leave the mode
             // hjkl, consistent with Pane/Resize modes: h/l switch tabs; as in Pane

@@ -22,6 +22,20 @@ struct BSPBalanceTests {
         #expect(abs((frames[third]?.width ?? 0) - 300) < 0.5)
     }
 
+    @Test("Balancing a mixed-orientation tree gives equal pane areas")
+    func balanceMixedOrientations() {
+        var tree = LayoutTree()
+        let right = tree.split(PaneID(0), orientation: .horizontal)!
+        _ = tree.split(PaneID(0), orientation: .vertical)!
+
+        tree.balance()
+        let frames = tree.frames(in: workspace)
+        let areas = frames.values.map { $0.width * $0.height }
+        #expect(areas.count == 3)
+        #expect(areas.allSatisfy { abs($0 - 240_000) < 0.5 })
+        #expect(abs((frames[right]?.width ?? 0) - 300) < 0.5)
+    }
+
     @Test("Balancing a single pane is a no-op")
     func balanceSingle() {
         var tree = LayoutTree()

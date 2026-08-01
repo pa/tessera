@@ -6,57 +6,56 @@ import AppKit
 /// Given a bundle identifier, it finds the running process (launching it if
 /// asked), builds the application-level `AXUIElement`, and hands back the
 /// window elements Tessera will move and resize.
+@MainActor
 enum AppTargeter {
-    enum TargetError: Error, CustomStringConvertible {
-        case notRunning(String)
-        case launchFailed(String)
-        case noWindows(String)
-
-        var description: String {
-            switch self {
-            case .notRunning(let id): return "\(id) is not running."
-            case .launchFailed(let id): return "Could not launch \(id)."
-            case .noWindows(let id): return "\(id) has no accessible windows."
-            }
-        }
-    }
-
     /// The running application for a bundle id, or nil if it isn't running.
     static func runningApp(bundleID: String) -> NSRunningApplication? {
         NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleID }
     }
 
-    /// The application-level AX element for a bundle id, launching the app and
-    /// waiting briefly if it isn't already running.
-    static func applicationElement(bundleID: String, launchIfNeeded: Bool) throws -> AXUIElement {
+    /// Launch an app if necessary, then wait asynchronously for its first
+    /// tileable window. This never blocks AppKit's main thread: app launch
+    /// completions and AX window creation can both depend on that run loop.
+    static func launchApplication(
+        bundleID: String,
+        completion: @escaping @MainActor (pid_t, AXWindow?) -> Void
+    ) {
         if let app = runningApp(bundleID: bundleID) {
-            return AXUIElementCreateApplication(app.processIdentifier)
+            waitForTileableWindow(pid: app.processIdentifier, attemptsRemaining: 50, completion: completion)
+            return
         }
-        guard launchIfNeeded else { throw TargetError.notRunning(bundleID) }
-
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            throw TargetError.launchFailed(bundleID)
+            completion(0, nil)
+            return
         }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { app, _ in
+            let pid = app?.processIdentifier ?? 0
+            Task { @MainActor in
+                guard pid != 0 else { completion(0, nil); return }
+                waitForTileableWindow(pid: pid, attemptsRemaining: 50, completion: completion)
+            }
+        }
+    }
 
-        // Launch synchronously enough for a prototype: kick it off, wait for the
-        // completion handler, then look the process up via the workspace (which
-        // avoids capturing a mutable var across the concurrent callback).
-        let semaphore = DispatchSemaphore(value: 0)
-        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in
-            semaphore.signal()
+    private static func waitForTileableWindow(
+        pid: pid_t,
+        attemptsRemaining: Int,
+        completion: @escaping @MainActor (pid_t, AXWindow?) -> Void
+    ) {
+        let appElement = AXUIElementCreateApplication(pid)
+        if let window = windows(of: appElement).first(where: { $0.isTileable && !$0.isMinimized }) {
+            completion(pid, window)
+            return
         }
-        _ = semaphore.wait(timeout: .now() + 5)
-
-        guard let app = runningApp(bundleID: bundleID) else {
-            throw TargetError.launchFailed(bundleID)
+        guard attemptsRemaining > 0 else {
+            completion(pid, nil)
+            return
         }
-        // Give the app a beat to create its first window before we query.
-        for _ in 0..<20 where windows(of: AXUIElementCreateApplication(app.processIdentifier)).isEmpty {
-            Thread.sleep(forTimeInterval: 0.1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            waitForTileableWindow(pid: pid, attemptsRemaining: attemptsRemaining - 1, completion: completion)
         }
-        return AXUIElementCreateApplication(app.processIdentifier)
     }
 
     /// All window elements owned by an application element.
@@ -111,6 +110,7 @@ enum AppTargeter {
         var appValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &appValue) == .success,
               let appValue else { return nil }
+        guard CFGetTypeID(appValue) == AXUIElementGetTypeID() else { return nil }
         let appElement = appValue as! AXUIElement
 
         var pid: pid_t = 0
@@ -119,6 +119,7 @@ enum AppTargeter {
         var windowValue: CFTypeRef?
         if AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success,
            let windowValue {
+            guard CFGetTypeID(windowValue) == AXUIElementGetTypeID() else { return nil }
             return (pid, AXWindow(element: windowValue as! AXUIElement))
         }
         if let first = windows(of: appElement).first {
@@ -134,26 +135,10 @@ enum AppTargeter {
         var focused: CFTypeRef?
         if AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focused) == .success,
            let focused {
+            guard CFGetTypeID(focused) == AXUIElementGetTypeID() else { return windows(of: appElement).first }
             return AXWindow(element: focused as! AXUIElement)
         }
         return windows(of: appElement).first
     }
 
-    /// The app's primary window — the one the user would expect a "move this
-    /// app" command to act on. Prefers the AX main window, falling back to the
-    /// first window in the list.
-    static func mainWindow(bundleID: String, launchIfNeeded: Bool) throws -> AXWindow {
-        let appElement = try applicationElement(bundleID: bundleID, launchIfNeeded: launchIfNeeded)
-
-        var mainValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(appElement, kAXMainWindowAttribute as CFString, &mainValue) == .success,
-           let mainValue {
-            return AXWindow(element: mainValue as! AXUIElement)
-        }
-
-        guard let first = windows(of: appElement).first else {
-            throw TargetError.noWindows(bundleID)
-        }
-        return first
-    }
 }

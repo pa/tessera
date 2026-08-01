@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windowObserver = WindowObserver()
     private let modeHUD = ModeHUD()
     private var isPaused = false
+    private var isRecordingHotKey = false
     private lazy var modeEngine: ModeEngine = {
         let engine = ModeEngine(tiling: tiling)
         engine.onModeChange = { [weak self] mode in self?.applyMode(mode) }
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindow: SettingsWindowController = {
         let controller = SettingsWindowController(bindingSet: bindingSet, settings: SettingsStore.load())
         controller.onHotKeysChange = { [weak self] set in self?.applyBindings(set) }
+        controller.onHotKeyRecordingChange = { [weak self] recording in self?.setHotKeyRecording(recording) }
         controller.onPaddingChange = { [weak self] percent in self?.tiling.updatePaddingPercent(percent) }
         return controller
     }()
@@ -56,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.toolTip = "Tessera"
         tiling.onWorkspaceChange = { [weak self] in self?.refreshStatusIndicator() }
+        tiling.onSessionChange = { [weak self] in self?.scheduleSessionSave() }
         statusItem.button?.title = statusTitle(for: .normal)
 
         // Nudge the system Accessibility prompt on first launch. The grant lands
@@ -65,15 +68,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         trackFrontmostApplication()
         applyBindings(bindingSet)
         modeEngine.start()
-        tiling.startEnforcing()
-        windowObserver.onWindowCreated = { [weak self] pid, window in
-            self?.tiling.handleWindowCreated(pid: pid, window: window)
+        windowObserver.onWindowDestroyed = { [weak self] window in
+            self?.tiling.handleWindowDestroyed(window)
         }
-        windowObserver.onWindowDestroyed = { [weak self] in
-            self?.tiling.handleWindowDestroyed()
+        windowObserver.onApplicationTerminated = { [weak self] pid in
+            self?.tiling.handleApplicationTerminated(pid: pid)
         }
         windowObserver.onWindowMovedOrResized = { [weak self] window in
             self?.tiling.handleWindowMovedOrResized(window)
+        }
+        windowObserver.onApplicationWindowsChanged = { [weak self] pid in
+            self?.tiling.handleApplicationWindowsChanged(pid: pid)
         }
         windowObserver.onFocusedWindowChanged = { [weak self] pid, window in
             self?.tiling.handleFocusedWindowChanged(pid, window)
@@ -91,22 +96,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 guard let self else { return }
                 let restored = SessionStore.load().map { self.tiling.restoreSession($0) } ?? false
-                if !restored { self.tiling.adoptAllWindowsByApp() }
-                self.startSessionAutosave()
+                if !restored { self.tiling.promptFirstWindow() }
+                self.startSessionPersistence()
             }
         }
     }
 
-    private var sessionSaveTimer: Timer?
-    private func startSessionAutosave() {
-        sessionSaveTimer?.invalidate()
-        sessionSaveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self.map { SessionStore.save($0.tiling.captureSession()) } }
+    private var sessionPersistenceReady = false
+    private var pendingSessionSave: DispatchWorkItem?
+
+    /// Start event-driven session persistence only after startup has restored (or
+    /// built) a workspace, so a denied/early-quit launch cannot overwrite a good
+    /// saved session with an empty one.
+    private func startSessionPersistence() {
+        sessionPersistenceReady = true
+        scheduleSessionSave()
+    }
+
+    /// Coalesce a burst of layout mutations into one atomic write. Unlike the
+    /// previous repeating timer, this does no work while the workspace is idle.
+    private func scheduleSessionSave() {
+        guard sessionPersistenceReady else { return }
+        pendingSessionSave?.cancel()
+        let save = DispatchWorkItem { [weak self] in
+            guard let self, self.sessionPersistenceReady else { return }
+            SessionStore.save(self.tiling.captureSession())
         }
+        pendingSessionSave = save
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: save)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        SessionStore.save(tiling.captureSession()) // persist layout for next launch
+        pendingSessionSave?.cancel()
+        if sessionPersistenceReady { SessionStore.save(tiling.captureSession()) }
+        windowObserver.stop()
         // Restore any hidden apps and re-snap windows before exiting.
         tiling.teardown()
     }
@@ -248,14 +271,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isPaused {
             // Drop every chord so they fall through to apps — except the
             // pause chord itself, which has to survive or there's no way back
-            // from the keyboard.
+            // from the keyboard. Recording takes precedence and drops that
+            // chord too, so the recorder receives its key untouched.
             hotKeys.unregisterAll()
-            registerPauseChordOnly()
+            if !isRecordingHotKey { registerPauseChordOnly() }
             modeEngine.setActive(false)
             tiling.suspend()
         } else {
-            applyBindings(bindingSet)   // re-register global hotkeys + mode chords
-            modeEngine.setActive(true)
+            if !isRecordingHotKey {
+                applyBindings(bindingSet) // re-register global hotkeys + mode chords
+                modeEngine.setActive(true)
+            }
             tiling.resume()
         }
         refreshStatusIndicator()
@@ -309,18 +335,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         case .pane:
             var seg: [String] = []
+            // In a stack every window fills the same rect, so directional focus
+            // and swap have no geometry to act on — offer index selection instead.
+            // In a stack the windows themselves are listed in the context pill
+            // above; this line stays about which keys apply.
+            let stacked = tiling.isActiveTabStacked
             if focus == .tiled || panes == 0 { seg.append("\(k("r"))/\(k("d")) split") }
-            if panes > 1 { seg.append("\(k("hjkl")) focus") }
-            if focus == .tiled && panes > 1 { seg.append("\(k("⇧hjkl")) swap") }
+            if panes > 1 && !stacked { seg.append("\(k("hjkl")) focus") }
+            if focus == .tiled && panes > 1 && !stacked { seg.append("\(k("⇧hjkl")) swap") }
             if windows > 1 { seg.append("\(k("n"))/\(k("p")) cycle") }
-            if focus == .tiled { seg.append("\(k("f")) full") }
+            if focus == .tiled && tiling.canToggleFullscreen {
+                seg.append("\(k("f")) \(tiling.isFocusedPaneZoomed ? "restore" : "full")")
+            }
             switch focus {
             case .unmanaged: seg.append("\(k("w")) attach")
             case .tiled:     seg.append("\(k("w")) float")
             case .floating:  seg.append("\(k("w")) tile")
             case .empty:     break
             }
-            if panes > 1 { seg.append("\(k("s")) stack") }
+            if panes > 1 { seg.append("\(k("s")) \(stacked ? "unstack" : "stack")") }
             if focus == .tiled { seg.append("\(k("c")) change") }
             seg.append(done)
             return "PANE   " + seg.joined(separator: " · ")
@@ -365,6 +398,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// launch and whenever the user edits bindings in preferences.
     private func applyBindings(_ set: KeyBindingSet) {
         bindingSet = set
+        // A recorder must receive the exact chord being typed; defer applying a
+        // just-captured binding until it releases exclusive input capture.
+        guard !isRecordingHotKey else { return }
         hotKeys.unregisterAll()
         for (command, binding) in set.bindings where !TilingCommand.modeEntry.contains(command) {
             let modifiers = HotKeyManager.Modifiers(rawValue: binding.modifiers)
@@ -380,6 +416,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modeEngine.updateEntryChords(pane: chord(set.bindings[.enterPaneMode]),
                                      tab: chord(set.bindings[.enterTabMode]),
                                      resize: chord(set.bindings[.enterResizeMode]))
+    }
+
+    /// Temporarily give a Settings key recorder exclusive input ownership so a
+    /// chord being assigned cannot also trigger a tiling action or enter a mode.
+    private func setHotKeyRecording(_ recording: Bool) {
+        guard isRecordingHotKey != recording else { return }
+        isRecordingHotKey = recording
+        if recording {
+            hotKeys.unregisterAll()
+            modeEngine.setActive(false)
+        } else if isPaused {
+            hotKeys.unregisterAll()
+            registerPauseChordOnly()
+        } else {
+            applyBindings(bindingSet)
+            modeEngine.setActive(true)
+        }
     }
 
     /// Convert a stored binding into an event-tap chord.
@@ -434,13 +487,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   app.processIdentifier != ownPID else { return }
             let pid = app.processIdentifier
             MainActor.assumeIsolated {
+                // Closing the last window of an app commonly transfers focus to
+                // another app without emitting a usable per-window AX destroy
+                // notification (Safari does this). Reconcile the app that just
+                // lost focus once; this remains entirely event-driven.
+                let previousPID = self?.lastActiveAppPID
                 self?.lastActiveAppPID = pid
-                // Backstop the create-observer: adopt any of this app's unmanaged
-                // windows (in case its observer missed them), then…
-                self?.tiling.handleAppActivated(pid: pid)
-                // …if the user switched (Cmd-Tab / third-party switcher) to a window
-                // we manage in another tab, follow it there instead of letting it
-                // render over the current tab.
+                if let previousPID, previousPID != pid {
+                    self?.tiling.handleApplicationWindowsChanged(pid: previousPID)
+                }
+                // If the user switched (Cmd-Tab / third-party switcher) to a
+                // window we already manage in another tab, follow it there.
+                // Unmanaged windows are intentionally left alone until the user
+                // explicitly attaches them.
                 self?.tiling.revealTab(forActivatedApp: pid)
             }
         }

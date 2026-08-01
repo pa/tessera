@@ -54,7 +54,7 @@ enum TilingCommand: String, CaseIterable, Codable {
 }
 
 /// A single chord: a Carbon virtual key code + Carbon modifier mask.
-struct KeyBinding: Codable, Equatable {
+struct KeyBinding: Codable, Equatable, Hashable {
     var keyCode: Int
     var modifiers: UInt32
 
@@ -69,6 +69,14 @@ struct KeyBinding: Codable, Equatable {
 /// whole set back to `defaults`.
 struct KeyBindingSet: Codable, Equatable {
     var bindings: [TilingCommand: KeyBinding]
+
+    /// Commands that already use `binding`, excluding the command currently
+    /// being edited. Carbon permits only one registration per chord.
+    func conflicts(for binding: KeyBinding, excluding command: TilingCommand) -> [TilingCommand] {
+        TilingCommand.ordered.filter {
+            $0 != command && bindings[$0] == binding
+        }
+    }
 
     // MARK: - Default set
 
@@ -151,7 +159,7 @@ enum HotKeyStore {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(set)
-            try data.write(to: url)
+            try data.write(to: url, options: .atomic)
         } catch {
             NSLog("Tessera: failed to save hot keys: \(error)")
         }

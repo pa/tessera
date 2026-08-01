@@ -175,9 +175,9 @@ modifiers (⌃⌥⌘⇧) + P / W**. Legacy `hotkeys.json` files (which carried a
 
 The **menu bar is deliberately minimal**: Accessibility status, Command Palette,
 Workspace Navigator, Settings…, Quit. Every tiling/tab action lives on hotkeys
-and the modal layers instead (the old per-action menu rows were removed). The
-startup first-window prompt still fires when there's no saved session; there is
-no manual "Pick First Window" menu row (auto-tiling adopts new windows anyway).
+and the modal layers instead (the old per-action menu rows were removed). When
+there is no restorable session, Tessera opens the first-window picker; newly
+created windows remain unmanaged until explicitly attached.
 
 All six brief milestones are complete.
 
@@ -197,19 +197,18 @@ All six brief milestones are complete.
   off-screen (`kAXHidden` is app-level; per-window parking covers multi-window
   apps). Restored on Reset / quit.
 - **Layout management is fully event-driven — no polling.** `WindowObserver`
-  registers per-app/-window AX notifications: `kAXWindowCreated` (adopt),
-  `kAXUIElementDestroyed` (collapse the pane), and `kAXWindowMoved`/`Resized`
-  (user dragged/resized a tiled window outside Tessera → re-snap). There is **no
-  maintenance timer**; nothing runs when nothing changes (idle CPU ≈ 0). Two
-  supporting pieces: (1) a **debounce** — move/resize fire continuously during a
-  drag, so `handleWindowMovedOrResized` arms a one-shot ~0.18s timer and re-snaps
-  only once the drag settles (no mid-drag fighting/jitter); (2) a **suppression
+  registers per-app/-window AX notifications: `kAXWindowCreated` (begin watching
+  the new window), `kAXUIElementDestroyed` (collapse a managed pane), and
+  `kAXWindowMoved`/`Resized` (user dragged/resized a tiled window outside Tessera
+  → re-snap). Newly created windows are deliberately left unmanaged until the
+  user explicitly attaches them. There is **no maintenance timer**; nothing runs
+  when nothing changes (idle CPU ≈ 0). Two supporting pieces: (1) a **debounce**
+  — move/resize fire continuously during a drag, so
+  `handleWindowMovedOrResized` arms a one-shot ~0.18s timer and re-snaps only
+  once the drag settles (no mid-drag fighting/jitter); (2) a **suppression
   window** — `beginProgrammaticLayout()` (called by `relayout`/`enforceLayout`)
   ignores move/resize events for ~0.4s so Tessera's own frame writes don't
   self-trigger a re-snap (and lazily-resizing apps like Chromium can settle).
-  Observer gaps (an attach race / flaky app) are backstopped on discrete events,
-  not a timer: observers re-attach on `didActivateApplication`, and
-  `handleAppActivated` adopts that app's unmanaged windows on activation.
 - **Follow-to-tab on app switch** — activating a managed window via Cmd-Tab or a
   third-party switcher switches to the tab that holds it (via
   `didActivateApplicationNotification` → `revealTab`), instead of letting macOS
@@ -223,14 +222,14 @@ All six brief milestones are complete.
   `AXWindow` **and** subrole `AXStandardWindow` (or, if no subrole, a title-bar
   close button). Browsers spawn many transient `AXWindow`s for autofill/menus/
   extension popups (reporting `AXUnknown` etc.); requiring a standard window
-  keeps those popovers from being adopted and yanked into panes.
+  keeps those popovers from being offered as placement candidates.
 - **Pause / Resume** (⌃⌥⌘P, or menu: "Pause Tessera") — temporarily disable window
   management: `TilingController.suspend()` stops responding to window events and
   hands every window back to macOS (unhide apps, un-park), `ModeEngine.setActive(false)`
   disables the event tap so mode chords fall through, and global hotkeys are
   unregistered. The layout is kept in memory; Resume re-applies it and restarts
-  everything. The pill shows `▚ ⏸`; event-driven adopts (`handleWindowCreated`,
-  `revealTab`) no-op while suspended. Pausing unregisters every chord so they
+  everything. The pill shows `▚ ⏸`; event-driven layout enforcement and
+  `revealTab` no-op while suspended. Pausing unregisters every chord so they
   fall through to apps — **except the pause chord itself**, which is
   re-registered alone (`registerPauseChordOnly`) so there is a keyboard way back.
 - **Change Pane Window** — re-pick the focused pane's window via the palette.
@@ -260,14 +259,13 @@ All six brief milestones are complete.
   off-screen parking (see "z-order reality" caveat — still bounded by apps that
   clamp window position on-screen).
 - **Organize windows by app** (`adoptAllWindowsByApp`, menu: "Organize Windows by
-  App", and the startup default when there's no saved session) — enumerate every
-  open window (`CGWindowList` for global z-order + AX resolve, `isTileable` +
-  non-minimized), then build **one tab per app** with the frontmost app's tab
-  active; a multi-window app's windows go in that tab **stacked** (monocle, `n/p`
-  to cycle). One-app-per-tab makes hiding exact — inactive apps are cleanly
-  `kAXHidden`, no per-window parking. From there the user reorganizes freely
-  (move-to-tab combines into a split via `addToTab`, `w attach`, etc.); ongoing
-  auto-tile stays window-based (new windows → active tab).
+  App") is an explicit import action: enumerate every open window (`CGWindowList`
+  for global z-order + AX resolve, `isTileable` + non-minimized), then build **one
+  tab per app** with the frontmost app's tab active; a multi-window app's windows
+  go in that tab **stacked** (monocle, `n/p` to cycle). One-app-per-tab makes
+  hiding exact — inactive apps are cleanly `kAXHidden`, no per-window parking.
+  Normal operation never auto-adopts new windows; use `w attach` to place one
+  deliberately.
 
 Pane mode keys: r/d split, hjkl focus (or move a floating window), ⇧hjkl swap,
 f fullscreen, w float, c change window. Tab mode: n new, h/l prev/next,

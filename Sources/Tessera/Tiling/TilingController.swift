@@ -37,8 +37,14 @@ final class TilingController {
         var stacked = false
     }
 
-    private var tabs: [Tab] = [Tab()]
-    private var activeTabIndex = 0
+    private var tabs: [Tab] = [Tab()] {
+        didSet { onSessionChange?() }
+    }
+    private var activeTabIndex = 0 {
+        didSet {
+            if activeTabIndex != oldValue { onSessionChange?() }
+        }
+    }
     private var pendingPane: PaneID?
     /// Where to return if the new-tab window picker is cancelled.
     private var newTabReturnIndex: Int?
@@ -75,6 +81,10 @@ final class TilingController {
     /// can refresh.
     var onWorkspaceChange: (() -> Void)?
 
+    /// Fired whenever persisted workspace state changes. The app delegate
+    /// debounces this into an atomic session write; it is not a polling timer.
+    var onSessionChange: (() -> Void)?
+
     /// Tile gap as a percentage of screen width (user-configurable in Settings).
     /// Drives both the outer margin and the inter-pane gaps.
     private var paddingPercent: Double = SettingsStore.load().paddingPercent
@@ -99,15 +109,13 @@ final class TilingController {
     /// no jitter). Event-armed — not a poll; nothing fires when nothing moves.
     private var resnapDebounce: Timer?
     private let resnapDelay: TimeInterval = 0.18
+    /// One reconciliation per app after an AX lifecycle/focus notification.
+    /// This catches apps that omit a per-window destroy event for red-close.
+    private var pendingWindowReconciliations: [pid_t: DispatchWorkItem] = [:]
     /// Ignore user move/resize events until this time — set whenever Tessera
     /// itself moves windows, so our own frame writes don't trigger a re-snap
     /// (and lazily-resizing apps like Chromium can settle without a fight).
     private var suppressEventsUntil = Date.distantPast
-
-    /// New standard windows are always auto-added to the active tab.
-    private let autoTileEnabled = true
-    /// Standard window ids seen so far, so auto-tile only grabs *new* windows.
-    private var knownWindowIDs: Set<CGWindowID> = []
 
     /// Non-tiled windows of managed apps that we've parked off-screen (so only
     /// the tiled window of a multi-window app shows), keyed by CGWindowID with
@@ -175,15 +183,8 @@ final class TilingController {
 
     // MARK: - Layout enforcement (fully event-driven — no polling)
 
-    /// Seed the known-window set so existing windows aren't grabbed all at once
-    /// (only windows opened afterward auto-tile). No timer: adopt/close/drift are
-    /// all driven by `WindowObserver` AX notifications.
-    func startEnforcing() {
-        knownWindowIDs = allStandardWindowIDs()
-    }
-
-    /// True while paused — window management is suspended (no enforcement,
-    /// auto-tile, or activation-follow), and windows are handed back to macOS.
+    /// True while paused — window management is suspended (no enforcement or
+    /// activation-follow), and windows are handed back to macOS.
     private(set) var isSuspended = false
 
     /// Pause window management: bring every managed window back on-screen (unhide
@@ -194,6 +195,8 @@ final class TilingController {
         isSuspended = true
         resnapDebounce?.invalidate()
         resnapDebounce = nil
+        pendingWindowReconciliations.values.forEach { $0.cancel() }
+        pendingWindowReconciliations.removeAll()
         restoreAllWindowsOnScreen()
     }
 
@@ -204,7 +207,6 @@ final class TilingController {
         relayout()
         applyWorkspaceVisibility()
         if let ref = occupants[focusedPane] { focus(ref) }
-        startEnforcing()
     }
 
     // MARK: - Event handlers (from WindowObserver)
@@ -228,11 +230,48 @@ final class TilingController {
         }
     }
 
-    /// A window was destroyed (closed) — collapse its pane immediately. Cheap:
-    /// only touches managed windows, no-ops if the closed window wasn't ours.
-    func handleWindowDestroyed() {
+    /// A window was destroyed (closed) — collapse exactly its managed pane. The
+    /// AX element from the notification is more reliable than probing a closed
+    /// element for liveness, which some apps continue to answer briefly.
+    func handleWindowDestroyed(_ destroyed: AXWindow) {
         guard !isSuspended, pendingPane == nil else { return }
-        removeClosedWindows()
+        let removed = removeWindows { ref in
+            if CFEqual(ref.window.element, destroyed.element) { return true }
+            guard let destroyedID = destroyed.windowID else { return false }
+            return ref.window.windowID == destroyedID
+        }
+        // A few apps hand AX a distinct/stale proxy in the destroy callback.
+        // Reconcile that one app once after it settles; this is event-triggered,
+        // not a maintenance poll.
+        guard !removed else { return }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(destroyed.element, &pid) == .success, pid > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.reconcileManagedWindows(for: pid)
+        }
+    }
+
+    /// An observed app terminated. Remove every pane/floater it owned even when
+    /// macOS does not emit an individual destruction notification per window.
+    func handleApplicationTerminated(pid: pid_t) {
+        pendingWindowReconciliations.removeValue(forKey: pid)?.cancel()
+        guard !isSuspended, pendingPane == nil else { return }
+        removeWindows { $0.pid == pid }
+    }
+
+    /// Reconcile an app's managed windows after an app-level AX focus change.
+    /// This covers apps that report the new focused window but omit the specific
+    /// destroyed-window notification when their red close button is used.
+    func handleApplicationWindowsChanged(pid: pid_t) {
+        guard !isSuspended, pendingPane == nil, pid > 0 else { return }
+        pendingWindowReconciliations[pid]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingWindowReconciliations[pid] = nil
+            self.reconcileManagedWindows(for: pid)
+        }
+        pendingWindowReconciliations[pid] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     /// The user moved or resized a window outside Tessera. Fires continuously
@@ -249,69 +288,29 @@ final class TilingController {
         }
     }
 
-    func handleWindowCreated(pid: pid_t, window: AXWindow) {
-        guard !isSuspended, autoTileEnabled, pendingPane == nil,
-              window.isTileable, let id = window.windowID,
-              !knownWindowIDs.contains(id), !occupiedWindowIDs().contains(id) else { return }
-        knownWindowIDs.insert(id)
-        addToLayout(WindowRef(pid: pid, window: window))
-        relayout()
-        if let ref = occupants[focusedPane] { focus(ref) }
-        applyWorkspaceVisibility()
-        onWorkspaceChange?()
-    }
-
-    private func allStandardWindowIDs() -> Set<CGWindowID> {
-        var ids = Set<CGWindowID>()
-        for app in AppTargeter.regularApps() {
-            let appElement = AXUIElementCreateApplication(app.processIdentifier)
-            for window in AppTargeter.windows(of: appElement) where window.isTileable {
-                if let id = window.windowID { ids.insert(id) }
+    /// Compare tracked windows for one app with its live AX window list. This is
+    /// used only as a one-shot fallback after that app reports a destruction.
+    private func reconcileManagedWindows(for pid: pid_t) {
+        guard !isSuspended, pendingPane == nil else { return }
+        let live = AppTargeter.windows(of: AXUIElementCreateApplication(pid))
+        _ = removeWindows { ref in
+            guard ref.pid == pid else { return false }
+            return !live.contains { candidate in
+                if CFEqual(candidate.element, ref.window.element) { return true }
+                guard let id = ref.window.windowID else { return false }
+                return candidate.windowID == id
             }
         }
-        return ids
     }
 
-    /// An app was activated (Cmd-Tab / click / launch). Adopt any of *that app's*
-    /// unmanaged, tileable windows into the active tab — a cheap, event-driven
-    /// backstop for the rare case where its `kAXWindowCreated` observer didn't
-    /// fire (attach race / flaky app). Window-based, so one app's windows can
-    /// live in different tabs.
-    func handleAppActivated(pid: pid_t) {
-        guard !isSuspended, autoTileEnabled, pendingPane == nil else { return }
-        let managed = occupiedWindowIDs()
-        var addedAny = false
-        for window in AppTargeter.windows(of: AXUIElementCreateApplication(pid)) where window.isTileable {
-            guard let id = window.windowID,
-                  !knownWindowIDs.contains(id), !managed.contains(id) else { continue }
-            knownWindowIDs.insert(id)
-            addToLayout(WindowRef(pid: pid, window: window))
-            addedAny = true
-        }
-        if addedAny {
-            relayout()
-            if let ref = occupants[focusedPane] { focus(ref) }
-            applyWorkspaceVisibility()
-            onWorkspaceChange?()
-        }
-    }
-
-    /// Drop panes whose window was closed; the BSP tree collapses so the
-    /// surviving neighbor expands to fill the freed space.
-    /// A window is dead if its owning app quit (process gone) or the window
-    /// itself was closed (AX element invalid). Checking the app catches ⌘Q,
-    /// where the element returns `cannotComplete` rather than `invalidUIElement`.
-    private func windowIsDead(_ ref: WindowRef) -> Bool {
-        guard let app = NSRunningApplication(processIdentifier: ref.pid), !app.isTerminated else { return true }
-        return !ref.window.isAlive
-    }
-
+    /// Remove managed windows matching `shouldRemove`; collapsing each matching
+    /// pane lets its sibling expand immediately.
     @discardableResult
-    private func removeClosedWindows() -> Bool {
+    private func removeWindows(where shouldRemove: (WindowRef) -> Bool) -> Bool {
         var changed = false
         for i in tabs.indices {
-            let deadPanes = tabs[i].occupants.compactMap { pane, ref in windowIsDead(ref) ? pane : nil }
-            for pane in deadPanes {
+            let panes = tabs[i].occupants.compactMap { pane, ref in shouldRemove(ref) ? pane : nil }
+            for pane in panes {
                 tabs[i].tree.remove(pane)
                 tabs[i].occupants[pane] = nil
                 if tabs[i].focusedPane == pane {
@@ -321,13 +320,14 @@ final class TilingController {
                 changed = true
             }
             let floatingBefore = tabs[i].floating.count
-            tabs[i].floating.removeAll { windowIsDead(WindowRef(pid: $0.pid, window: $0.window)) }
+            tabs[i].floating.removeAll { shouldRemove(WindowRef(pid: $0.pid, window: $0.window)) }
             if tabs[i].floating.count != floatingBefore { changed = true }
         }
         guard changed else { return false }
         gcEmptyTabs()
         relayout()
         applyWorkspaceVisibility()
+        onWorkspaceChange?()
         return true
     }
 
@@ -369,6 +369,8 @@ final class TilingController {
     func teardown() {
         resnapDebounce?.invalidate()
         resnapDebounce = nil
+        pendingWindowReconciliations.values.forEach { $0.cancel() }
+        pendingWindowReconciliations.removeAll()
         for tab in tabs {
             let frames = tab.tree.frames(in: workspaceRect, config: config)
             for (pane, ref) in tab.occupants {
@@ -422,19 +424,19 @@ final class TilingController {
         }
 
         palette.onSelect = { [weak self] item in
-            if self?.fill(newPane, with: item) == false { self?.cancelPending() }
+            self?.fill(newPane, with: item) { [weak self] in self?.cancelPending() }
         }
         palette.onCancel = { [weak self] in self?.cancelPending() }
         palette.present(anchorRectAX: anchor, excludingWindowIDs: [])
     }
 
     /// Zoom the focused pane to fill the whole workspace (other tiled windows
-    /// park off-screen), or un-zoom back to the tiled layout. Toggles.
+    /// park off-screen), or restore the tiled layout. Zoom only applies to a
+    /// non-stacked workspace with at least two occupied panes.
     func toggleFullscreen() {
-        guard pendingPane == nil else { return }
         syncFocusFromLiveWindow()
-        guard occupants[focusedPane] != nil else { return }
-        zoomedPane = (zoomedPane == focusedPane) ? nil : focusedPane
+        guard canToggleFullscreen else { return }
+        zoomedPane = isFocusedPaneZoomed ? nil : focusedPane
         relayout()
         if let ref = occupants[focusedPane] { focus(ref) }
     }
@@ -574,7 +576,6 @@ final class TilingController {
         if focusState() == .unmanaged, let f = focusedWindowProvider() {
             if let id = f.window.windowID {
                 detachWindow(id)  // if it lives in another tab, move it — never duplicate
-                knownWindowIDs.insert(id)
             }
             addToLayout(WindowRef(pid: f.pid, window: f.window))
             relayout()
@@ -690,7 +691,7 @@ final class TilingController {
         overlay.show(inAXRect: rect)
         palette.onSelect = { [weak self] item in
             // On failure keep the existing window (don't remove the pane).
-            if self?.fill(pane, with: item) == false {
+            self?.fill(pane, with: item) { [weak self] in
                 self?.pendingPane = nil
                 self?.overlay.hide()
                 NSSound.beep()
@@ -718,15 +719,6 @@ final class TilingController {
         zoomedPane = nil
         relayout()
         if let ref = occupants[focusedPane] { focus(ref) }
-    }
-
-    /// Equalize all pane sizes in the focused tab (AeroSpace "balance-sizes").
-    func balanceSizes() {
-        guard pendingPane == nil else { return }
-        var tab = tabs[activeTabIndex]
-        tab.tree.balance()
-        tabs[activeTabIndex] = tab
-        relayout()
     }
 
     /// Cycle focus to the next/previous window in tree order (AeroSpace DFS focus).
@@ -847,24 +839,36 @@ final class TilingController {
         }
     }
 
-    /// Remove empty tabs (no tiled or floating windows), except the active one,
-    /// so composing tabs by pulling windows around cleans up after itself.
+    /// Remove every empty tab. If the active tab closes, select the next tab or
+    /// (when it was last) the previous tab. A workspace always retains one empty
+    /// tab when it is the only tab left.
     private func gcEmptyTabs() {
         guard tabs.count > 1 else { return }
-        var kept: [Tab] = []
-        var newActive = 0
-        for (i, tab) in tabs.enumerated() {
-            let isEmpty = tab.occupants.isEmpty && tab.floating.isEmpty
-            if i == activeTabIndex || !isEmpty {
-                if i == activeTabIndex { newActive = kept.count }
-                kept.append(tab)
-            }
+        let oldActive = activeTabIndex
+        let survivors = tabs.enumerated().filter {
+            !$0.element.occupants.isEmpty || !$0.element.floating.isEmpty
         }
-        if kept.count != tabs.count {
-            tabs = kept
-            activeTabIndex = newActive
+        guard survivors.count != tabs.count else { return }
+        guard !survivors.isEmpty else {
+            tabs = [Tab()]
+            activeTabIndex = 0
+            zoomedPane = nil
+            lastTabIndex = nil
             onWorkspaceChange?()
+            return
         }
+
+        // Keep the active tab when it survived. Otherwise prefer the next tab
+        // after the removed one, falling back to the previous surviving tab.
+        let newActive = survivors.firstIndex { $0.offset == oldActive }
+            ?? survivors.firstIndex { $0.offset > oldActive }
+            ?? survivors.lastIndex { $0.offset < oldActive }
+            ?? 0
+        tabs = survivors.map(\.element)
+        activeTabIndex = newActive
+        if oldActive != survivors[newActive].offset { zoomedPane = nil }
+        lastTabIndex = nil // old numeric indices are no longer meaningful
+        onWorkspaceChange?()
     }
 
     func occupiedWindowIDs() -> Set<CGWindowID> {
@@ -910,28 +914,26 @@ final class TilingController {
     /// nothing matched (caller falls back to the first-window prompt).
     @discardableResult
     func restoreSession(_ session: SavedSession) -> Bool {
-        // Index of currently-open tileable windows.
-        var available: [(bundleID: String, title: String, windowID: CGWindowID?, pid: pid_t, window: AXWindow)] = []
+        // Index of currently-open tileable windows. A matched candidate is
+        // removed immediately, including when it has no CGWindowID, so one live
+        // window can never be restored into multiple saved panes.
+        var available: [(identity: WindowIdentity, pid: pid_t, window: AXWindow)] = []
         for app in AppTargeter.regularApps() {
             let bundle = app.bundleIdentifier ?? ""
             let appElement = AXUIElementCreateApplication(app.processIdentifier)
             for window in AppTargeter.windows(of: appElement) where window.isTileable {
-                available.append((bundle, window.title ?? "", window.windowID, app.processIdentifier, window))
+                available.append((
+                    WindowIdentity(bundleID: bundle, title: window.title ?? "", windowID: window.windowID),
+                    app.processIdentifier,
+                    window
+                ))
             }
         }
-        var used = Set<CGWindowID>()
-        func isFree(_ id: CGWindowID?) -> Bool { id.map { !used.contains($0) } ?? true }
         func match(_ saved: SavedWindow) -> (pid_t, AXWindow)? {
-            if let wid = saved.windowID, let hit = available.first(where: { $0.windowID == wid && isFree(wid) }) {
-                return (hit.pid, hit.window)
-            }
-            if let hit = available.first(where: { $0.bundleID == saved.bundleID && $0.title == saved.title && isFree($0.windowID) }) {
-                return (hit.pid, hit.window)
-            }
-            if let hit = available.first(where: { $0.bundleID == saved.bundleID && isFree($0.windowID) }) {
-                return (hit.pid, hit.window)
-            }
-            return nil
+            let identities = available.map(\.identity)
+            guard let index = WindowMatcher.bestMatchIndex(for: saved, in: identities) else { return nil }
+            let hit = available.remove(at: index)
+            return (hit.pid, hit.window)
         }
 
         var newTabs: [Tab] = []
@@ -942,7 +944,6 @@ final class TilingController {
             for (paneValue, savedWin) in savedTab.occupants {
                 if let (pid, window) = match(savedWin) {
                     tab.occupants[PaneID(paneValue)] = WindowRef(pid: pid, window: window)
-                    if let id = window.windowID { used.insert(id) }
                 }
             }
             // Collapse panes whose window didn't come back.
@@ -953,7 +954,6 @@ final class TilingController {
             for savedFloat in savedTab.floating {
                 if let (pid, window) = match(savedFloat.window) {
                     tab.floating.append(FloatingWindow(pid: pid, window: window, frame: savedFloat.frame))
-                    if let id = window.windowID { used.insert(id) }
                 }
             }
             if !tab.occupants.isEmpty || !tab.floating.isEmpty { newTabs.append(tab) }
@@ -962,7 +962,6 @@ final class TilingController {
 
         tabs = newTabs
         activeTabIndex = min(max(0, session.activeTabIndex), tabs.count - 1)
-        knownWindowIDs = allStandardWindowIDs() // don't re-auto-tile restored windows
         relayout()
         if let ref = occupants[focusedPane] { focus(ref) }
         applyWorkspaceVisibility()
@@ -982,7 +981,7 @@ final class TilingController {
         guard let rect = frames()[firstPane] else { pendingPane = nil; return }
         overlay.show(inAXRect: rect)
         palette.onSelect = { [weak self] item in
-            if self?.fill(firstPane, with: item) == false {
+            self?.fill(firstPane, with: item) { [weak self] in
                 self?.pendingPane = nil
                 self?.overlay.hide()
             }
@@ -1035,8 +1034,8 @@ final class TilingController {
 
     /// Organize every open window into tabs — **one tab per app**, with a
     /// multi-window app's windows **stacked** (monocle) so `n/p` cycles them. The
-    /// frontmost app's tab is active. This is the startup default (no saved
-    /// session) and a re-runnable command. One-app-per-tab makes hiding exact:
+    /// frontmost app's tab is active. This is an explicit, re-runnable import
+    /// command. One-app-per-tab makes hiding exact:
     /// inactive apps are cleanly `kAXHidden` (no per-window parking).
     func adoptAllWindowsByApp() {
         guard pendingPane == nil else { return }
@@ -1078,7 +1077,6 @@ final class TilingController {
         activeTabIndex = 0
         zoomedPane = nil
         lastTabIndex = nil
-        knownWindowIDs = Set(refs.compactMap { $0.window.windowID })
         applyWorkspaceVisibility()
         relayout()
         if let ref = occupants[focusedPane] { focus(ref) }
@@ -1114,6 +1112,62 @@ final class TilingController {
     /// Number of tiled windows in the active tab (0 or 1 means nothing to resize).
     var activePaneCount: Int { occupants.count }
 
+    /// True when the active tab shows its windows one-at-a-time (monocle). In a
+    /// stack every window occupies the same rect, so directional focus/swap has
+    /// no geometry to work with — selection is by index instead.
+    var isActiveTabStacked: Bool { tabs[activeTabIndex].stacked }
+
+    /// Panes of the active tab in **reading order** (row band, then x) — the
+    /// order the number badges use. Reading order is used rather than BSP
+    /// traversal because a nested layout traverses column-major, which doesn't
+    /// match how the eye scans the screen.
+    var orderedPanes: [PaneID] {
+        let frames = self.frames()
+        let placed = occupants.keys.compactMap { id -> (PaneID, CGRect)? in
+            frames[id].map { (id, $0) }
+        }
+        guard !placed.isEmpty else { return [] }
+        // Band tolerance: half the shortest pane, so a row survives small insets.
+        let band = max(24, (placed.map { $0.1.height }.min() ?? 100) / 2)
+        return placed.sorted { a, b in
+            if abs(a.1.minY - b.1.minY) > band { return a.1.minY < b.1.minY }
+            return a.1.minX < b.1.minX
+        }.map { $0.0 }
+    }
+
+    /// Whether the focused tiled pane is currently Tessera-zoomed.
+    var isFocusedPaneZoomed: Bool {
+        zoomedPane == focusedPane && occupants[focusedPane] != nil
+    }
+
+    /// Whether pane zoom can be toggled in the current layout. Native fullscreen
+    /// is intentionally left to macOS and is never converted into Tessera zoom.
+    var canToggleFullscreen: Bool {
+        guard pendingPane == nil,
+              !tabs[activeTabIndex].stacked,
+              occupants.count > 1,
+              occupants[focusedPane] != nil else { return false }
+        if isFocusedPaneZoomed { return true }
+        guard let ref = occupants[focusedPane] else { return false }
+        return !isFullscreenLike(ref.window, frame: ref.window.frame)
+    }
+
+    /// Focus the nth pane (1-based) of the active tab. Works tiled or stacked.
+    func focusPane(number: Int) {
+        let panes = orderedPanes
+        guard number >= 1, number <= panes.count else { NSSound.beep(); return }
+        focusedPane = panes[number - 1]
+        if isActiveTabStacked { relayout() }   // raise the picked window in the stack
+        if let ref = occupants[focusedPane] { focus(ref) }
+        onWorkspaceChange?()
+    }
+
+    /// Switch to the nth tab (1-based).
+    func selectTab(number: Int) {
+        guard number >= 1, number <= tabs.count, number - 1 != activeTabIndex else { return }
+        switchTo(number - 1)
+    }
+
     /// Number of floating windows in the active tab.
     var activeFloatingCount: Int { tabs[activeTabIndex].floating.count }
 
@@ -1147,7 +1201,7 @@ final class TilingController {
         guard let paneRect = frames()[firstPane] else { return }
         overlay.show(inAXRect: paneRect)
         palette.onSelect = { [weak self] item in
-            if self?.fill(firstPane, with: item) == false { self?.cancelNewTab() }
+            self?.fill(firstPane, with: item) { [weak self] in self?.cancelNewTab() }
         }
         palette.onCancel = { [weak self] in self?.cancelNewTab() }
         palette.present(anchorRectAX: paneRect, excludingWindowIDs: [])
@@ -1325,13 +1379,29 @@ final class TilingController {
 
     // MARK: - Palette outcomes
 
-    /// Place the resolved window into `pane`. Returns false if no window could be
-    /// resolved (e.g. every window of the picked app is already tiled) — the
-    /// caller decides how to clean up (roll back a split vs. keep an existing
-    /// pane).
-    @discardableResult
-    private func fill(_ pane: PaneID, with item: PaletteItem) -> Bool {
-        guard let ref = resolve(item) else { return false }
+    /// Resolve a palette selection and place it into `pane`. App launches wait
+    /// asynchronously for a tileable window, so choosing a cold app never blocks
+    /// the main thread. `onFailure` restores the caller's pending-pane state.
+    private func fill(_ pane: PaneID, with item: PaletteItem, onFailure: @escaping () -> Void) {
+        switch item.kind {
+        case .window:
+            guard let ref = resolveRunningWindow(item) else { onFailure(); return }
+            fill(pane, with: ref)
+        case .application:
+            guard let bundleID = item.bundleID else { onFailure(); return }
+            if let ref = resolveRunningApplication(bundleID: bundleID) {
+                fill(pane, with: ref)
+                return
+            }
+            AppTargeter.launchApplication(bundleID: bundleID) { [weak self] pid, window in
+                guard let self, self.pendingPane == pane else { return }
+                guard pid != 0, let window else { onFailure(); return }
+                self.fill(pane, with: WindowRef(pid: pid, window: window))
+            }
+        }
+    }
+
+    private func fill(_ pane: PaneID, with ref: WindowRef) {
         overlay.hide()
         pendingPane = nil
         newTabReturnIndex = nil
@@ -1344,7 +1414,6 @@ final class TilingController {
         focus(ref)
         gcEmptyTabs()
         applyWorkspaceVisibility()
-        return true
     }
 
     /// Bring the tiled set forward as a group, then activate the focused pane's
@@ -1423,32 +1492,24 @@ final class TilingController {
         }
     }
 
-    /// Turn a palette selection into a concrete, tracked window — never one
-    /// that's already tiled/floating in any tab (so the same window can't land
-    /// in two panes). Launches the app if the item is an application.
-    private func resolve(_ item: PaletteItem) -> WindowRef? {
+    /// Resolve an already-running palette window by its stable CGWindowID.
+    private func resolveRunningWindow(_ item: PaletteItem) -> WindowRef? {
+        guard case .window(let windowID) = item.kind,
+              let pid = item.pid,
+              let window = AppTargeter.window(pid: pid, windowID: windowID) else { return nil }
+        return WindowRef(pid: pid, window: window)
+    }
+
+    /// Prefer an un-tiled, tileable window of a running app; if all are tiled,
+    /// moving its first window is allowed.
+    private func resolveRunningApplication(bundleID: String) -> WindowRef? {
         let occupied = occupiedWindowIDs()
-        switch item.kind {
-        case .window(let windowID):
-            // A window already tiled elsewhere is allowed — fill() detaches it
-            // from its old spot and moves it here.
-            guard let pid = item.pid,
-                  let window = AppTargeter.window(pid: pid, windowID: windowID) else { return nil }
-            return WindowRef(pid: pid, window: window)
-        case .application:
-            // Prefer an un-tiled window of the app; if all are tiled, move its
-            // first window here.
-            guard let bundleID = item.bundleID,
-                  let appElement = try? AppTargeter.applicationElement(bundleID: bundleID, launchIfNeeded: true),
-                  let pid = AppTargeter.runningApp(bundleID: bundleID)?.processIdentifier else { return nil }
-            let windows = AppTargeter.windows(of: appElement)
-            let free = windows.first { window in
-                guard let id = window.windowID else { return false }
-                return !occupied.contains(id)
-            }
-            guard let window = free ?? windows.first else { return nil }
-            return WindowRef(pid: pid, window: window)
-        }
+        guard let app = AppTargeter.runningApp(bundleID: bundleID) else { return nil }
+        let windows = AppTargeter.windows(of: AXUIElementCreateApplication(app.processIdentifier))
+            .filter { $0.isTileable && !$0.isMinimized }
+        let free = windows.first { $0.windowID.map { !occupied.contains($0) } ?? false }
+        guard let window = free ?? windows.first else { return nil }
+        return WindowRef(pid: app.processIdentifier, window: window)
     }
 }
 

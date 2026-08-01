@@ -33,9 +33,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
-      - name: Checkout main
+      - name: Checkout release tag
         uses: actions/checkout@v4
         with:
+          # workflow_dispatch must build the requested tag, not the default
+          # branch that happened to start the manual run.
+          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Checkout tap
@@ -53,6 +56,14 @@ jobs:
       - name: Select newest Xcode (needs Swift 6)
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -n1)"
 
+      - name: Validate release source
+        run: |
+          set -euo pipefail
+          swift test
+          swift build -c release
+
+      # Prepare the formula locally first. Do not publish it until its source
+      # has built, tested, and produced a bottle successfully.
       - name: Point formula at this tag's source + strip old bottle
         run: |
           set -euo pipefail
@@ -60,7 +71,6 @@ jobs:
           SRC_SHA="$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')"
           python3 scripts/formula_update.py tap/Formula/tessera.rb --url "$URL" --sha "$SRC_SHA" --strip-bottle
           cp tap/Formula/tessera.rb Formula/tessera.rb
-          ( cd tap && git add Formula/tessera.rb && git commit -m "Release ${TAG}: source url + sha" && git push )
 
       # Notes are composed from the commit range, not --generate-notes: that
       # builds its list from merged pull requests, and this repo pushes straight
@@ -100,9 +110,8 @@ jobs:
       - name: Build + bottle
         run: |
           set -euo pipefail
-          brew tap pa/tessera
-          brew trust pa/tessera || true
-          brew install --build-bottle --verbose tessera
+          brew install --build-bottle --verbose ./tap/Formula/tessera.rb
+          brew test tessera
           brew bottle --json --no-rebuild --root-url="https://github.com/${REPO}/releases/download/${TAG}" tessera
           for f in tessera--*.bottle.tar.gz; do mv "$f" "${f/tessera--/tessera-}"; done
           ls -la tessera-*.bottle.tar.gz *.json

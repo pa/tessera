@@ -82,19 +82,21 @@ enum AppCatalog {
             let icon = app.icon
             icon?.size = NSSize(width: 20, height: 20)
 
-            for (index, window) in AppTargeter.windows(of: appElement).enumerated() {
+            for window in AppTargeter.windows(of: appElement) {
+                // A window palette item is resolved later by CGWindowID. Do not
+                // show rows that cannot be selected successfully.
+                guard let windowID = window.windowID else { continue }
                 let title = window.title ?? ""
-                let windowID = window.windowID
                 let displayTitle = title.isEmpty ? ownerName : title
 
                 items.append(PaletteItem(
-                    id: windowID.map { "\(pid):\($0)" } ?? "\(pid):ax\(index)",
+                    id: "\(pid):\(windowID)",
                     title: displayTitle,
                     subtitle: ownerName,
                     icon: icon,
                     bundleID: app.bundleIdentifier,
                     pid: pid,
-                    kind: .window(windowID: windowID ?? 0)
+                    kind: .window(windowID: windowID)
                 ))
             }
         }

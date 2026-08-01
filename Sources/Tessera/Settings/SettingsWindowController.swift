@@ -8,6 +8,7 @@ import AppKit
 @MainActor
 final class SettingsWindowController: NSObject {
     var onHotKeysChange: ((KeyBindingSet) -> Void)?
+    var onHotKeyRecordingChange: ((Bool) -> Void)?
     var onPaddingChange: ((Double) -> Void)?
 
     private var bindingSet: KeyBindingSet
@@ -98,6 +99,7 @@ final class SettingsWindowController: NSObject {
         paddingNote.widthAnchor.constraint(equalToConstant: 380).isActive = true
         stack.addArrangedSubview(paddingNote)
 
+
         let divider = NSBox()
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
@@ -134,6 +136,9 @@ final class SettingsWindowController: NSObject {
             recorder.binding = bindingSet.bindings[command]
             recorder.onCapture = { [weak self] captured in
                 self?.updateBinding(command, to: captured)
+            }
+            recorder.onRecordingChange = { [weak self] recording in
+                self?.onHotKeyRecordingChange?(recording)
             }
             recorders[command] = recorder
 
@@ -200,6 +205,7 @@ final class SettingsWindowController: NSObject {
 
     // MARK: - Changes
 
+
     @objc private func paddingChanged() {
         let value = (paddingSlider.doubleValue * 10).rounded() / 10 // snap to 0.1%
         settings.paddingPercent = value
@@ -215,6 +221,21 @@ final class SettingsWindowController: NSObject {
     }
 
     private func updateBinding(_ command: TilingCommand, to binding: KeyBinding) {
+        let conflicts = bindingSet.conflicts(for: binding, excluding: command)
+        guard conflicts.isEmpty else {
+            // KeyRecorderView has already rendered the newly pressed chord; put
+            // it back immediately so the UI always reflects the active binding.
+            recorders[command]?.binding = bindingSet.bindings[command]
+            let names = conflicts.map(\.title).joined(separator: ", ")
+            let alert = NSAlert()
+            alert.messageText = "Shortcut already in use"
+            alert.informativeText = "\(binding.display) is assigned to \(names). Choose a different shortcut."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            if let window { alert.beginSheetModal(for: window) }
+            else { alert.runModal() }
+            return
+        }
         bindingSet.bindings[command] = binding
         commitHotkeys()
     }

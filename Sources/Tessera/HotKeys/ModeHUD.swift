@@ -102,6 +102,10 @@ final class ModeHUD {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
+        // `.hudWindow` is a dark material in *both* system appearances, so pin
+        // the panel to dark: otherwise, in Light mode, the chips resolve their
+        // light-appearance (dark ink) colours and vanish against a dark HUD.
+        panel.appearance = NSAppearance(named: .darkAqua)
 
         let effect = NSVisualEffectView()
         effect.material = .hudWindow
@@ -110,6 +114,19 @@ final class ModeHUD {
         effect.layer?.cornerRadius = 11
         effect.layer?.masksToBounds = true
         effect.autoresizingMask = [.width, .height]
+
+        // The material is translucent, so on a white window or wallpaper it goes
+        // pale and light-on-dark text washes out. An opaque scrim over the blur
+        // makes contrast independent of whatever happens to be behind the HUD.
+        let scrim = NSView()
+        scrim.wantsLayer = true
+        scrim.layer?.backgroundColor = NSColor(white: 0.07, alpha: 0.82).cgColor
+        scrim.layer?.cornerRadius = 11
+        scrim.layer?.borderWidth = 1
+        scrim.layer?.borderColor = NSColor(white: 1, alpha: 0.14).cgColor
+        scrim.autoresizingMask = [.width, .height]
+        scrim.frame = effect.bounds
+        effect.addSubview(scrim)
 
         let stack = NSStackView()
         stack.orientation = .horizontal
@@ -131,19 +148,38 @@ final class ModeHUD {
 /// A rounded keycap-style chip for a key glyph in the hint bar.
 private final class KeyChip: NSView {
     private let field = NSTextField(labelWithString: "")
-    private static let accent = NSColor(red: 0, green: 0.68, blue: 0.71, alpha: 1)
+
+    // Dynamic so the chip stays legible on a light HUD as well as a dark one —
+    // white-alpha fills disappear entirely against the light `hudWindow`
+    // material. CALayer colours don't re-resolve on their own, so these are
+    // re-applied in viewDidChangeEffectiveAppearance.
+    private static func isDark(_ a: NSAppearance) -> Bool {
+        a.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+    private static let accent = NSColor(name: "hudAccent") { a in
+        isDark(a) ? NSColor(red: 0.18, green: 0.85, blue: 0.87, alpha: 1)   // bright teal on dark
+                  : NSColor(red: 0.00, green: 0.40, blue: 0.43, alpha: 1)   // deep teal on light
+    }
+    private static let onAccent = NSColor(name: "hudOnAccent") { a in
+        isDark(a) ? .black : .white
+    }
+    private static let chipBG = NSColor(name: "hudChipBG") { a in
+        isDark(a) ? NSColor.white.withAlphaComponent(0.12)
+                  : NSColor.black.withAlphaComponent(0.07)
+    }
+    private static let chipBorder = NSColor(name: "hudChipBorder") { a in
+        isDark(a) ? NSColor.white.withAlphaComponent(0.20)
+                  : NSColor.black.withAlphaComponent(0.18)
+    }
 
     init(text: String) {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 5.5
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
 
         field.stringValue = text
         field.font = .monospacedSystemFont(ofSize: 11.5, weight: .semibold)
-        field.textColor = Self.accent
         field.alignment = .center
         field.translatesAutoresizingMaskIntoConstraints = false
         addSubview(field)
@@ -153,27 +189,45 @@ private final class KeyChip: NSView {
             field.topAnchor.constraint(equalTo: topAnchor, constant: 3),
             field.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
         ])
+        applyIdleColors()
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    private static let idleBG = NSColor.white.withAlphaComponent(0.10).cgColor
+    /// Layer colours are resolved values, so re-resolve them when the system
+    /// (or the window's) appearance flips.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyIdleColors()
+    }
+
+    private func applyIdleColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Self.chipBG.cgColor
+            layer?.borderColor = Self.chipBorder.cgColor
+            field.textColor = Self.accent
+        }
+    }
 
     /// Light the chip: snap to an accent fill, then ease back — a keycastr-style
     /// key highlight. Only this chip's layer changes (GPU-composited, no
     /// text re-layout), so it stays cheap even on rapid presses.
     func pop() {
         layer?.removeAnimation(forKey: "fade")
-        layer?.backgroundColor = Self.accent.cgColor
-        field.textColor = .black
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Self.accent.cgColor
+            field.textColor = Self.onAccent
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
             guard let self else { return }
-            let fade = CABasicAnimation(keyPath: "backgroundColor")
-            fade.fromValue = Self.accent.cgColor
-            fade.toValue = Self.idleBG
-            fade.duration = 0.28
-            self.layer?.add(fade, forKey: "fade")
-            self.layer?.backgroundColor = Self.idleBG
-            self.field.textColor = Self.accent
+            self.effectiveAppearance.performAsCurrentDrawingAppearance {
+                let fade = CABasicAnimation(keyPath: "backgroundColor")
+                fade.fromValue = Self.accent.cgColor
+                fade.toValue = Self.chipBG.cgColor
+                fade.duration = 0.28
+                self.layer?.add(fade, forKey: "fade")
+                self.layer?.backgroundColor = Self.chipBG.cgColor
+                self.field.textColor = Self.accent
+            }
         }
     }
 }

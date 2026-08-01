@@ -7,13 +7,20 @@ import Carbon.HIToolbox
 @MainActor
 final class KeyRecorderView: NSButton {
     var onCapture: ((KeyBinding) -> Void)?
+    /// Lets the settings controller suspend Tessera's global input handlers
+    /// while this control owns a keystroke.
+    var onRecordingChange: ((Bool) -> Void)?
 
     var binding: KeyBinding? {
         didSet { refreshTitle() }
     }
 
     private var isRecording = false {
-        didSet { refreshTitle() }
+        didSet {
+            guard isRecording != oldValue else { return }
+            refreshTitle()
+            onRecordingChange?(isRecording)
+        }
     }
 
     init() {
@@ -63,9 +70,11 @@ final class KeyRecorderView: NSButton {
 
         let captured = KeyBinding(keyCode: Int(event.keyCode), modifiers: modifiers)
         binding = captured
+        // Commit while global handlers are still suspended. Setting
+        // `isRecording` false below then re-enables them with the new binding.
+        onCapture?(captured)
         isRecording = false
         window?.makeFirstResponder(nil)
-        onCapture?(captured)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

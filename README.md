@@ -53,6 +53,7 @@ inactive apps' windows and fights every macOS tiling WM).
 
 ## Highlights
 
+- **Intentional placement** — every split and new tab asks exactly which app/window belongs in the new pane; new windows stay unmanaged until you attach them.
 - **BSP tiling** with configurable padding — split any focused window horizontally/vertically.
 - **Virtual tabs** — independent workspaces; a tab can be a stacked (monocle) stack of windows.
 - **Modal keys** (Zellij-style) — `⌃P` pane · `⌃T` tab · `⌃R` resize, with a live, context-aware hint bar.
@@ -68,7 +69,7 @@ Stated up front so nothing surprises you after install:
 - **Multi-monitor is not supported yet.** Tessera manages the **main display
   only** — every layout, tab and pane is computed from the main display's bounds.
   On a multi-display setup a second monitor is not tiled independently, and a
-  window that gets adopted from another display will be pulled onto the main one.
+  window explicitly placed from another display will be pulled onto the main one.
   This is the next thing on the roadmap; until then `⌃⌥⌘P` (Pause) hands every
   window straight back to macOS if you need the other screen.
 - **Apps with a minimum window size overflow their pane.** A pure-Accessibility
@@ -92,8 +93,10 @@ Default prefix is **`⌃⌥⌘`** (Control-Option-Command). A few to get going:
 | `⌃⌥⌘ H J K L` | Focus left / down / up / right |
 | `⌃⌥⌘⇧ H J K L` | Move window between panes |
 | `⌃⌥⌘⇧P` / `⌃⌥⌘⇧W` | Command palette / Workspace navigator |
-| `⌃P` then `r`/`d`, `hjkl`, `w`, `f`, `s` | **Pane mode**: split · focus · float · fullscreen · stack |
+| `⌃P` then `r`/`d`, `hjkl`, `w`, `f`, `s` | **Pane mode**: split · focus · attach/float · fullscreen · stack |
 | `⌃T` then `n`, `h`/`l`, `m` | **Tab mode**: new · prev/next · move-to-tab-# |
+
+With no saved workspace, Tessera opens the picker for the first pane. New windows remain unmanaged; focus one and press `⌃P`, then `w`, to deliberately attach it to the current tab.
 
 Everything is rebindable in **Settings** (`⌘,` or the menu). Full reference on the
 [**documentation site**](https://pa.github.io/tessera/).
@@ -122,8 +125,15 @@ swift build -c release    # compile just the binary
 swift test                # run the TesseraCore unit tests (no app needed)
 ```
 
-Test through the `.app` (not `swift run`) — macOS keys the Accessibility grant to
-a stable bundle identity. See [`CLAUDE.md`](CLAUDE.md) for the architecture.
+For daily local testing of the shipped bare-binary/service flow, run:
+
+```sh
+./scripts/test-local-service.sh
+```
+
+This builds the release binary and restarts a per-user launchd service. The `.app`
+flow above remains useful when you specifically want to test bundle packaging. See
+[`CLAUDE.md`](CLAUDE.md) for the architecture.
 
 ## License
 

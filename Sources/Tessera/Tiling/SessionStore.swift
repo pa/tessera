@@ -2,12 +2,8 @@ import Foundation
 import TesseraCore
 
 /// A window's durable identity for session restore. Window IDs and pids don't
-/// survive a restart, so matching falls back to bundle id + title.
-struct SavedWindow: Codable {
-    var bundleID: String
-    var title: String
-    var windowID: UInt32?
-}
+/// survive a restart, so matching falls back to bundle ID + title.
+typealias SavedWindow = WindowIdentity
 
 struct SavedFloating: Codable {
     var window: SavedWindow

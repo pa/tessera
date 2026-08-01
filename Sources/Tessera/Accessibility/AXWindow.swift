@@ -190,8 +190,11 @@ struct AXWindow {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
               let value else { return nil }
-        // AXValue is a CF type; bridge the copied ref back to it before unboxing.
+        // AX clients can expose an attribute with an unexpected CF type; treat
+        // that as unreadable instead of crashing the menu-bar agent.
+        guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         let axValue = value as! AXValue
+        guard AXValueGetType(axValue) == type else { return nil }
         return unbox(axValue)
     }
 }

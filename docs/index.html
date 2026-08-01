@@ -147,15 +147,16 @@
     <p class="lead">Tessera is a menu-bar agent (look for the <span class="glyph">▚</span> pill — it shows your tab
       position and active mode). It never takes over your Mac; it just arranges windows when you ask.</p>
     <div class="flist">
-      <div class="frow reveal"><div class="ft"><span class="n">01</span>BSP tiling</div><div class="fd">Split any focused window right or down, with configurable padding.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">02</span>Virtual tabs</div><div class="fd">Independent workspaces; a tab can stack windows in monocle mode.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">03</span>Modal keys</div><div class="fd">Zellij-style Pane / Tab / Resize modes with a live, context-aware hint bar.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">04</span>Command palette</div><div class="fd">Fuzzy-find and launch apps, or focus any open window.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">05</span>Workspace navigator</div><div class="fd">A searchable tree of tabs, panes, and windows with app icons.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">06</span>Floating &amp; zoom</div><div class="fd">Pop a window out to float, or zoom a pane to fill the screen.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">07</span>Organize by app</div><div class="fd">One command lays every open window out as one tab per app.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">08</span>Event-driven</div><div class="fd">No polling — reacts instantly to window events; ~0% idle CPU.</div></div>
-      <div class="frow reveal"><div class="ft"><span class="n">09</span>Stubborn apps</div><div class="fd">Toggles <code>AXEnhancedUserInterface</code> so Chromium/Electron apps actually tile.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">01</span>Intentional placement</div><div class="fd">Every split and new tab asks exactly which app or window belongs in its new pane.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">02</span>BSP tiling</div><div class="fd">Split any focused window right or down, with configurable padding.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">03</span>Virtual tabs</div><div class="fd">Independent workspaces; a tab can stack windows in monocle mode.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">04</span>Modal keys</div><div class="fd">Zellij-style Pane / Tab / Resize modes with a live, context-aware hint bar.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">05</span>Command palette</div><div class="fd">Fuzzy-find and launch apps, or focus any open window.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">06</span>Workspace navigator</div><div class="fd">A searchable tree of tabs, panes, and windows with app icons.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">07</span>Floating &amp; zoom</div><div class="fd">Pop a window out to float, or zoom a pane to fill the screen.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">08</span>Organize by app</div><div class="fd">One command lays every open window out as one tab per app.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">09</span>Event-driven</div><div class="fd">No background polling — reacts to Accessibility window events with ~0% idle CPU.</div></div>
+      <div class="frow reveal"><div class="ft"><span class="n">10</span>Stubborn apps</div><div class="fd">Toggles <code>AXEnhancedUserInterface</code> so Chromium/Electron apps actually tile.</div></div>
     </div>
   </section>
 
@@ -213,9 +214,10 @@
     <div class="seclabel"><b>04</b> &nbsp;/&nbsp; Usage &amp; configuration</div>
     <h2>Configure it, or don't.</h2>
     <h3>Getting started</h3>
-    <p class="lead">After granting Accessibility, Tessera lays your open windows out as <strong>one tab per app</strong>
-      (a multi-window app's windows are stacked so you cycle them with <kbd>n</kbd>/<kbd>p</kbd> in Pane mode). Re-run
-      anytime from the menu bar → <strong>Organize Windows by App</strong>.</p>
+    <p class="lead">After granting Accessibility, Tessera restores your saved workspace. With no saved workspace,
+      it opens a picker for the first pane; choose exactly which app or window belongs there. New windows remain
+      unmanaged until you explicitly attach them with <kbd>w</kbd> in Pane mode. To intentionally import a busy
+      desktop, use the menu bar → <strong>Organize Windows by App</strong>.</p>
     <h3>Configuring shortcuts</h3>
     <p class="lead">Open <strong>Settings</strong> (<kbd>⌘,</kbd> when Tessera is active, or the menu-bar
       <span class="glyph">▚</span> menu) → <strong>Hotkeys</strong>. Click any shortcut and press a new chord to
@@ -234,7 +236,7 @@
         <div class="ft"><span class="n">—</span>Multi-monitor</div>
         <div class="fd">Not supported yet. Tessera manages the <strong>main display only</strong> — every
           layout, tab and pane is computed from its bounds. A second monitor isn't tiled independently,
-          and a window adopted from another display is pulled onto the main one. Next on the roadmap;
+          and a window explicitly placed from another display is pulled onto the main one. Next on the roadmap;
           until then <kbd>⌃⌥⌘P</kbd> hands every window back to macOS.</div>
       </div>
       <div class="frow">

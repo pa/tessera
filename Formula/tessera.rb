@@ -71,5 +71,6 @@ class Tessera < Formula
 
   test do
     assert_predicate bin/"tessera", :executable?
+    assert_match "Global shortcuts", shell_output("#{bin}/tessera --dump-keybindings")
   end
 end
