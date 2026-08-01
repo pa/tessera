@@ -70,7 +70,10 @@ jobs:
           URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
           SRC_SHA="$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')"
           python3 scripts/formula_update.py tap/Formula/tessera.rb --url "$URL" --sha "$SRC_SHA" --strip-bottle
-          cp tap/Formula/tessera.rb Formula/tessera.rb
+          # Commit locally so Homebrew can clone this exact, un-published formula
+          # revision through a file:// tap below. It is pushed only after the
+          # bottle has been created and uploaded.
+          ( cd tap && git add Formula/tessera.rb && git commit -m "Release ${TAG}: source url + sha" )
 
       # Notes are composed from the commit range, not --generate-notes: that
       # builds its list from merged pull requests, and this repo pushes straight
@@ -110,9 +113,10 @@ jobs:
       - name: Build + bottle
         run: |
           set -euo pipefail
-          # Register the checked-out tap locally: Homebrew deliberately refuses
-          # to install a formula by bare filesystem path.
-          brew tap pa/tessera ./tap
+          # Register this exact local tap revision. A plain `brew tap pa/tessera`
+          # would clone its remote and therefore miss the un-published source
+          # URL/checksum prepared above.
+          brew tap pa/tessera "file://${PWD}/tap"
           brew trust pa/tessera || true
           brew install --build-bottle --verbose pa/tessera/tessera
           brew test pa/tessera/tessera
