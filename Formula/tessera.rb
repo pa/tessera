@@ -21,14 +21,15 @@ class Tessera < Formula
   # Stable release (so `brew install tessera` works without --HEAD). To ship a
   # new version: push a new tag, then bump `url` + `sha256` (the checksum of the
   # tag's source tarball: `curl -sL <url> | shasum -a 256`).
-  url "https://github.com/pa/tessera/archive/refs/tags/v0.1.4.tar.gz"
-  sha256 "bbf7495e165cb43e426ad654d3e62cb1e16333567bbf11a4cd5b4bb045f6f6c1"
+  url "https://github.com/pa/tessera/archive/refs/tags/v0.1.5.tar.gz"
+  sha256 "61df20daa2bee5526fd36244a29e326d9cc6cb4d1ef0d5556d37a3e9d5771bc2"
   head "https://github.com/pa/tessera.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/pa/tessera/releases/download/v0.1.4"
-    sha256 cellar: :any_skip_relocation, arm64_sequoia: "4d6d336549e062945c4b0d2aaed61fb6c5daa0d0df9461bb87c75e437f432c51"
+    root_url "https://github.com/pa/tessera/releases/download/v0.1.5"
+    sha256 cellar: :any_skip_relocation, arm64_sequoia: "12b9117215dfdd893abfbd364e8e8079de006b70403edd738ef119bdc8d57bda"
   end
+
 
 
 
