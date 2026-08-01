@@ -110,9 +110,13 @@ jobs:
       - name: Build + bottle
         run: |
           set -euo pipefail
-          brew install --build-bottle --verbose ./tap/Formula/tessera.rb
-          brew test tessera
-          brew bottle --json --no-rebuild --root-url="https://github.com/${REPO}/releases/download/${TAG}" tessera
+          # Register the checked-out tap locally: Homebrew deliberately refuses
+          # to install a formula by bare filesystem path.
+          brew tap pa/tessera ./tap
+          brew trust pa/tessera || true
+          brew install --build-bottle --verbose pa/tessera/tessera
+          brew test pa/tessera/tessera
+          brew bottle --json --no-rebuild --root-url="https://github.com/${REPO}/releases/download/${TAG}" pa/tessera/tessera
           for f in tessera--*.bottle.tar.gz; do mv "$f" "${f/tessera--/tessera-}"; done
           ls -la tessera-*.bottle.tar.gz *.json
 
