@@ -129,6 +129,14 @@ jobs:
           JSON="$(ls *.json | head -n1)"
           python3 scripts/formula_update.py tap/Formula/tessera.rb \
             --bottle-json "$JSON" --root-url "https://github.com/${REPO}/releases/download/${TAG}"
-          cp tap/Formula/tessera.rb Formula/tessera.rb
           ( cd tap && git add Formula/tessera.rb && git commit -m "Release ${TAG}: arm64_sequoia bottle" && git push )
-          git add Formula/tessera.rb && git commit -m "Release ${TAG}: formula (source + bottle)" && git push origin HEAD:${{ github.event.repository.default_branch }}
+
+          # The source checkout is deliberately detached at the release tag.
+          # Start from the current default branch before mirroring the formula,
+          # so a concurrent main push cannot make this final push non-fast-forward.
+          git fetch origin "${{ github.event.repository.default_branch }}"
+          git checkout -B release-formula "origin/${{ github.event.repository.default_branch }}"
+          cp tap/Formula/tessera.rb Formula/tessera.rb
+          git add Formula/tessera.rb
+          git commit -m "Release ${TAG}: formula (source + bottle)"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
